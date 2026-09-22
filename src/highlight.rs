@@ -11,7 +11,7 @@ use crate::Line;
 /// The fields are private: use the constructors and builder methods. Owned
 /// methods ([`Highlight::with_line`]) consume and return `Self` for chaining,
 /// in-place methods ([`Highlight::push_line`]) mutate and return `&mut Self`.
-/// Rendering the highlight to a string is not part of this type yet.
+/// Rendering to a string goes through [`Display`](std::fmt::Display).
 ///
 /// # Examples
 ///
@@ -66,6 +66,34 @@ impl Highlight {
     /// Returns the line numbers of the snippet, in display order.
     pub fn line_numbers(&self) -> Vec<Option<usize>> {
         self.snippet.iter().map(Line::number).collect()
+    }
+
+    /// Width of the line-number gutter in characters: the number of digits of
+    /// the largest line number, or `0` when no line is numbered.
+    ///
+    /// The largest number is used rather than the last one, so that the numbers
+    /// stay aligned even when a snippet lists them out of order.
+    pub fn gutter_width(&self) -> usize {
+        self.snippet
+            .iter()
+            .filter_map(Line::number)
+            .map(|number| number.checked_ilog10().unwrap_or(0) as usize + 1)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The gutter in front of `line`, such as `" 8 | "` or `"10 | "`.
+    ///
+    /// It is empty when no line of the snippet is numbered, and blank padding
+    /// for a line without a number, so that the text of every line starts at
+    /// the same offset. `line` needs not belong to this highlight: only its
+    /// number and the gutter width of the snippet matter.
+    ///
+    /// [`Display`](std::fmt::Display) writes this in front of every line;
+    /// it is public so that a colored renderer can print the parts of a line
+    /// separately.
+    pub fn gutter(&self, line: &Line) -> String {
+        gutter_of(self.gutter_width(), line)
     }
 
     /// Returns `true` if there is nothing to show: no leading text, no trailing
@@ -197,6 +225,56 @@ impl Extend<Line> for Highlight {
     }
 }
 
+impl std::fmt::Display for Highlight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let width = self.gutter_width();
+        let mut first = true;
+
+        if let Some(above) = &self.above {
+            write_separator(f, &mut first)?;
+            f.write_str(above)?;
+        }
+
+        for line in &self.snippet {
+            write_separator(f, &mut first)?;
+            f.write_str(&gutter_of(width, line))?;
+            f.write_str(line.content())?;
+        }
+
+        if let Some(below) = &self.below {
+            write_separator(f, &mut first)?;
+            f.write_str(below)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// The gutter of `line` when the snippet has a gutter `width` characters wide.
+///
+/// Empty when `width` is `0`, blank padding for an unnumbered line otherwise.
+/// [`Highlight::gutter`] and [`Display`](std::fmt::Display) both go through
+/// this, so the parts a caller prints on their own are the whole.
+fn gutter_of(width: usize, line: &Line) -> String {
+    match (width, line.number()) {
+        (0, _) => String::new(),
+        (width, Some(number)) => format!("{number:>width$} | "),
+        (width, None) => format!("{:>width$} | ", ""),
+    }
+}
+
+/// Writes the `\n` between two rendered lines, except before the first one.
+fn write_separator(
+    f: &mut std::fmt::Formatter<'_>,
+    first: &mut bool,
+) -> std::fmt::Result {
+    if *first {
+        *first = false;
+        return Ok(());
+    }
+    f.write_str("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::Highlight;
@@ -263,5 +341,81 @@ mod tests {
         highlight.extend([Line::numbered(2, "b")]);
         assert_eq!(highlight.line_numbers(), vec![None, Some(2)]);
         assert_eq!(highlight.above(), None);
+    }
+
+    #[test]
+    fn gutter_width_counts_only_numbered_lines() {
+        assert_eq!(Highlight::new().gutter_width(), 0);
+        assert_eq!(Highlight::new().with_line("a").gutter_width(), 0);
+        assert_eq!(
+            Highlight::new()
+                .with_lines([(7, "a"), (8, "b")])
+                .gutter_width(),
+            1
+        );
+        assert_eq!(
+            Highlight::new()
+                .with_lines([(9, "a"), (100, "b")])
+                .gutter_width(),
+            3
+        );
+        // The largest number wins, not the last one.
+        assert_eq!(
+            Highlight::new()
+                .with_lines([(100, "a"), (9, "b")])
+                .gutter_width(),
+            3
+        );
+    }
+
+    #[test]
+    fn gutter_is_blank_padding_or_empty() {
+        let highlight = Highlight::new().with_lines([(8, "a"), (10, "b")]);
+        assert_eq!(highlight.gutter(&Line::numbered(8, "a")), " 8 | ");
+        assert_eq!(highlight.gutter(&Line::numbered(10, "b")), "10 | ");
+        assert_eq!(highlight.gutter(&Line::new("...")), "   | ");
+
+        let unnumbered = Highlight::new().with_line("a");
+        assert_eq!(unnumbered.gutter(&Line::new("a")), "");
+        assert_eq!(unnumbered.gutter(&Line::numbered(8, "a")), "");
+    }
+
+    #[test]
+    fn display_renders_context_around_the_snippet() {
+        let highlight = Highlight::new()
+            .with_above("error[E0308]: mismatched types")
+            .with_lines([(1, "fn main() {"), (9, "}")])
+            .with_below("note: expected `u8`, found `i32`");
+
+        let expected = [
+            "error[E0308]: mismatched types",
+            "1 | fn main() {",
+            "9 | }",
+            "note: expected `u8`, found `i32`",
+        ]
+        .join("\n");
+        assert_eq!(highlight.to_string(), expected);
+    }
+
+    #[test]
+    fn display_sizes_the_gutter_and_keeps_the_bar_for_unnumbered_lines() {
+        let highlight = Highlight::new()
+            .with_line((8, "a"))
+            .with_line("b")
+            .with_line((10, "c"));
+        assert_eq!(highlight.to_string(), " 8 | a\n   | b\n10 | c");
+    }
+
+    #[test]
+    fn display_omits_the_gutter_without_numbers_and_context_that_is_none() {
+        assert_eq!(Highlight::new().to_string(), "");
+        assert_eq!(Highlight::new().with_lines(["a", "b"]).to_string(), "a\nb");
+        assert_eq!(Highlight::new().with_above("only").to_string(), "only");
+
+        // `Some("")` is set, so it still takes its own empty line.
+        assert_eq!(
+            Highlight::new().with_above("").with_below("").to_string(),
+            "\n"
+        );
     }
 }
