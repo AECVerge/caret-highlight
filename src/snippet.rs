@@ -2,43 +2,62 @@ use crate::Line;
 
 /// A rustc-style highlighted snippet, built up from three parts.
 ///
-/// A highlight is made of an optional leading text, a block of [`Line`]s (the
-/// snippet itself), and an optional trailing text. The two context texts are
-/// plain strings without line numbers, so they can also carry prose such as an
-/// elision marker, while every line in the snippet decides for itself whether
-/// it is numbered.
+/// A snippet is made of an optional leading text, a block of [`Line`]s, and an
+/// optional trailing text. The two context texts are plain strings without line
+/// numbers, so they can also carry prose such as an elision marker, while every
+/// line in the snippet decides for itself whether it is numbered.
+///
+/// A line that carries a range of characters is marked: a line of
+/// [`marker`](Snippet::marker) characters is drawn underneath it. Marker
+/// lines are never stored, only built on demand — by
+/// [`Display`](std::fmt::Display), or by [`Snippet::marker_content`] for a
+/// caller that renders the parts itself.
 ///
 /// The fields are private: use the constructors and builder methods. Owned
-/// methods ([`Highlight::with_line`]) consume and return `Self` for chaining,
-/// in-place methods ([`Highlight::push_line`]) mutate and return `&mut Self`.
+/// methods ([`Snippet::with_line`]) consume and return `Self` for chaining,
+/// in-place methods ([`Snippet::push_line`]) mutate and return `&mut Self`.
 /// Rendering to a string goes through [`Display`](std::fmt::Display).
 ///
 /// # Examples
 ///
 /// ```
-/// use caret_highlight::{Highlight, Line};
+/// use caret_highlight::{Snippet, Line};
 ///
-/// let highlight = Highlight::new()
+/// let snippet = Snippet::new()
 ///     .with_above("error[E0308]: mismatched types")
 ///     .with_line(Line::numbered(1, "fn main() {"))
 ///     .with_lines(["...", "let x: u8 = 1i32;"])
 ///     .with_below("note: expected `u8`, found `i32`");
 ///
-/// assert_eq!(highlight.line_numbers(), vec![Some(1), None, None]);
-/// assert_eq!(highlight.lines().len(), 3);
+/// assert_eq!(snippet.line_numbers(), vec![Some(1), None, None]);
+/// assert_eq!(snippet.lines().len(), 3);
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Highlight {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snippet {
     /// Text printed before the snippet, without a line number.
     above: Option<String>,
     /// The lines of the snippet, in display order.
-    snippet: Vec<Line>,
+    lines: Vec<Line>,
     /// Text printed after the snippet, without a line number.
     below: Option<String>,
+    /// Character repeated to mark a highlighted range.
+    marker: char,
 }
 
-impl Highlight {
-    /// Creates an empty highlight with no context text and no lines.
+impl Default for Snippet {
+    /// An empty snippet whose [`marker`](Snippet::marker) is `'^'`.
+    fn default() -> Self {
+        Self {
+            above: None,
+            lines: Vec::new(),
+            below: None,
+            marker: '^',
+        }
+    }
+}
+
+impl Snippet {
+    /// Creates an empty snippet with no context text and no lines.
     pub fn new() -> Self {
         Self::default()
     }
@@ -55,17 +74,17 @@ impl Highlight {
 
     /// Returns the lines of the snippet.
     pub fn lines(&self) -> &[Line] {
-        &self.snippet
+        &self.lines
     }
 
     /// Returns the lines of the snippet for in-place editing.
     pub fn lines_mut(&mut self) -> &mut Vec<Line> {
-        &mut self.snippet
+        &mut self.lines
     }
 
     /// Returns the line numbers of the snippet, in display order.
     pub fn line_numbers(&self) -> Vec<Option<usize>> {
-        self.snippet.iter().map(Line::number).collect()
+        self.lines.iter().map(Line::number).collect()
     }
 
     /// Width of the line-number gutter in characters: the number of digits of
@@ -74,7 +93,7 @@ impl Highlight {
     /// The largest number is used rather than the last one, so that the numbers
     /// stay aligned even when a snippet lists them out of order.
     pub fn gutter_width(&self) -> usize {
-        self.snippet
+        self.lines
             .iter()
             .filter_map(Line::number)
             .map(|number| number.checked_ilog10().unwrap_or(0) as usize + 1)
@@ -86,7 +105,7 @@ impl Highlight {
     ///
     /// It is empty when no line of the snippet is numbered, and blank padding
     /// for a line without a number, so that the text of every line starts at
-    /// the same offset. `line` needs not belong to this highlight: only its
+    /// the same offset. `line` needs not belong to this snippet: only its
     /// number and the gutter width of the snippet matter.
     ///
     /// [`Display`](std::fmt::Display) writes this in front of every line;
@@ -99,11 +118,11 @@ impl Highlight {
     /// Returns `true` if there is nothing to show: no leading text, no trailing
     /// text and no lines.
     ///
-    /// A highlight whose snippet is empty but whose context is set is not
-    /// empty, because it still contributes text. Ask about the snippet alone
-    /// with `highlight.lines().is_empty()`.
+    /// A snippet whose lines are empty but whose context is set is not empty,
+    /// because it still contributes text. Ask about the lines alone with
+    /// `snippet.lines().is_empty()`.
     pub fn is_empty(&self) -> bool {
-        self.above.is_none() && self.snippet.is_empty() && self.below.is_none()
+        self.above.is_none() && self.lines.is_empty() && self.below.is_none()
     }
 
     // --- builder: owned, chainable -------------------------------------
@@ -164,7 +183,7 @@ impl Highlight {
 
     /// Appends one line to the snippet.
     pub fn push_line(&mut self, line: impl Into<Line>) -> &mut Self {
-        self.snippet.push(line.into());
+        self.lines.push(line.into());
         self
     }
 
@@ -174,7 +193,7 @@ impl Highlight {
         I: IntoIterator,
         I::Item: Into<Line>,
     {
-        self.snippet.extend(lines.into_iter().map(Into::into));
+        self.lines.extend(lines.into_iter().map(Into::into));
         self
     }
 
@@ -184,48 +203,50 @@ impl Highlight {
         I: IntoIterator,
         I::Item: Into<Line>,
     {
-        self.snippet.clear();
+        self.lines.clear();
         self.extend_lines(lines)
     }
 
     /// Removes every line of the snippet, keeping the context text.
     pub fn clear_lines(&mut self) -> &mut Self {
-        self.snippet.clear();
+        self.lines.clear();
         self
     }
 
-    /// Removes the context text and every line.
+    /// Removes the context text and every line, keeping the marker.
     pub fn clear(&mut self) -> &mut Self {
-        *self = Self::new();
+        self.above = None;
+        self.lines.clear();
+        self.below = None;
         self
     }
 }
 
-impl FromIterator<Line> for Highlight {
-    /// Collects lines into a highlight that has no context text.
+impl FromIterator<Line> for Snippet {
+    /// Collects lines into a snippet that has no context text.
     ///
     /// ```
-    /// # use caret_highlight::{Highlight, Line};
+    /// # use caret_highlight::{Snippet, Line};
     /// let lines = [Line::numbered(1, "a"), Line::new("b")];
-    /// let highlight: Highlight = lines.into_iter().collect();
-    /// assert_eq!(highlight.line_numbers(), vec![Some(1), None]);
+    /// let snippet: Snippet = lines.into_iter().collect();
+    /// assert_eq!(snippet.line_numbers(), vec![Some(1), None]);
     /// ```
     fn from_iter<I: IntoIterator<Item = Line>>(lines: I) -> Self {
         Self {
-            snippet: lines.into_iter().collect(),
+            lines: lines.into_iter().collect(),
             ..Self::default()
         }
     }
 }
 
-impl Extend<Line> for Highlight {
+impl Extend<Line> for Snippet {
     /// Appends lines to the snippet.
     fn extend<I: IntoIterator<Item = Line>>(&mut self, lines: I) {
-        self.snippet.extend(lines);
+        self.lines.extend(lines);
     }
 }
 
-impl std::fmt::Display for Highlight {
+impl std::fmt::Display for Snippet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let width = self.gutter_width();
         let mut first = true;
@@ -235,9 +256,9 @@ impl std::fmt::Display for Highlight {
             f.write_str(above)?;
         }
 
-        for line in &self.snippet {
+        for line in &self.lines {
             write_separator(f, &mut first)?;
-            f.write_str(&gutter_of(width, line))?;
+            f.write_str(&gutter_of(width, line.number()))?;
             f.write_str(line.content())?;
         }
 
@@ -250,13 +271,15 @@ impl std::fmt::Display for Highlight {
     }
 }
 
-/// The gutter of `line` when the snippet has a gutter `width` characters wide.
+/// The gutter of a line numbered `number` when the snippet has a gutter `width`
+/// characters wide, or the blank gutter of a marker line for [`None`].
 ///
 /// Empty when `width` is `0`, blank padding for an unnumbered line otherwise.
-/// [`Highlight::gutter`] and [`Display`](std::fmt::Display) both go through
-/// this, so the parts a caller prints on their own are the whole.
-fn gutter_of(width: usize, line: &Line) -> String {
-    match (width, line.number()) {
+/// [`Snippet::gutter`], [`Snippet::marker_gutter`] and
+/// [`Display`](std::fmt::Display) all go through this, so the parts a caller
+/// prints on their own are the whole.
+fn gutter_of(width: usize, number: Option<usize>) -> String {
+    match (width, number) {
         (0, _) => String::new(),
         (width, Some(number)) => format!("{number:>width$} | "),
         (width, None) => format!("{:>width$} | ", ""),
@@ -277,18 +300,18 @@ fn write_separator(
 
 #[cfg(test)]
 mod tests {
-    use super::Highlight;
+    use super::Snippet;
     use crate::Line;
 
     #[test]
     fn owned_and_in_place_builders_agree() {
-        let owned = Highlight::new()
+        let owned = Snippet::new()
             .with_above("above")
             .with_line(Line::numbered(1, "a"))
             .with_lines(["...", "b"])
             .with_below("below");
 
-        let mut in_place = Highlight::new();
+        let mut in_place = Snippet::new();
         in_place
             .set_above("above")
             .push_line(Line::numbered(1, "a"))
@@ -305,63 +328,63 @@ mod tests {
 
     #[test]
     fn is_empty_ignores_nothing_and_clears_are_scoped() {
-        assert!(Highlight::new().is_empty());
-        assert!(!Highlight::new().with_above("").is_empty());
-        assert!(!Highlight::new().with_line("").is_empty());
+        assert!(Snippet::new().is_empty());
+        assert!(!Snippet::new().with_above("").is_empty());
+        assert!(!Snippet::new().with_line("").is_empty());
 
-        let mut highlight = Highlight::new()
+        let mut snippet = Snippet::new()
             .with_above("a")
             .with_line("b")
             .with_below("c");
-        highlight.clear_lines();
-        assert!(highlight.lines().is_empty());
-        assert_eq!(highlight.above(), Some("a"));
-        assert_eq!(highlight.below(), Some("c"));
+        snippet.clear_lines();
+        assert!(snippet.lines().is_empty());
+        assert_eq!(snippet.above(), Some("a"));
+        assert_eq!(snippet.below(), Some("c"));
 
-        highlight.clear_above().clear_below();
-        assert!(highlight.is_empty());
+        snippet.clear_above().clear_below();
+        assert!(snippet.is_empty());
 
-        highlight.set_above("a").push_line("b").clear();
-        assert_eq!(highlight, Highlight::new());
+        snippet.set_above("a").push_line("b").clear();
+        assert_eq!(snippet, Snippet::new());
     }
 
     #[test]
     fn set_lines_replaces_and_lines_mut_edits() {
-        let mut highlight = Highlight::new().with_lines([(1, "a"), (2, "b")]);
-        highlight.set_lines([(9, "z")]);
-        assert_eq!(highlight.lines(), [Line::numbered(9, "z")]);
+        let mut snippet = Snippet::new().with_lines([(1, "a"), (2, "b")]);
+        snippet.set_lines([(9, "z")]);
+        assert_eq!(snippet.lines(), [Line::numbered(9, "z")]);
 
-        highlight.lines_mut()[0].set_content("Z");
-        assert_eq!(highlight.lines(), [Line::numbered(9, "Z")]);
+        snippet.lines_mut()[0].set_content("Z").unwrap();
+        assert_eq!(snippet.lines(), [Line::numbered(9, "Z")]);
     }
 
     #[test]
     fn collect_and_extend_feed_the_snippet() {
-        let mut highlight: Highlight = [Line::new("a")].into_iter().collect();
-        highlight.extend([Line::numbered(2, "b")]);
-        assert_eq!(highlight.line_numbers(), vec![None, Some(2)]);
-        assert_eq!(highlight.above(), None);
+        let mut snippet: Snippet = [Line::new("a")].into_iter().collect();
+        snippet.extend([Line::numbered(2, "b")]);
+        assert_eq!(snippet.line_numbers(), vec![None, Some(2)]);
+        assert_eq!(snippet.above(), None);
     }
 
     #[test]
     fn gutter_width_counts_only_numbered_lines() {
-        assert_eq!(Highlight::new().gutter_width(), 0);
-        assert_eq!(Highlight::new().with_line("a").gutter_width(), 0);
+        assert_eq!(Snippet::new().gutter_width(), 0);
+        assert_eq!(Snippet::new().with_line("a").gutter_width(), 0);
         assert_eq!(
-            Highlight::new()
+            Snippet::new()
                 .with_lines([(7, "a"), (8, "b")])
                 .gutter_width(),
             1
         );
         assert_eq!(
-            Highlight::new()
+            Snippet::new()
                 .with_lines([(9, "a"), (100, "b")])
                 .gutter_width(),
             3
         );
         // The largest number wins, not the last one.
         assert_eq!(
-            Highlight::new()
+            Snippet::new()
                 .with_lines([(100, "a"), (9, "b")])
                 .gutter_width(),
             3
@@ -370,19 +393,19 @@ mod tests {
 
     #[test]
     fn gutter_is_blank_padding_or_empty() {
-        let highlight = Highlight::new().with_lines([(8, "a"), (10, "b")]);
-        assert_eq!(highlight.gutter(&Line::numbered(8, "a")), " 8 | ");
-        assert_eq!(highlight.gutter(&Line::numbered(10, "b")), "10 | ");
-        assert_eq!(highlight.gutter(&Line::new("...")), "   | ");
+        let snippet = Snippet::new().with_lines([(8, "a"), (10, "b")]);
+        assert_eq!(snippet.gutter(&Line::numbered(8, "a")), " 8 | ");
+        assert_eq!(snippet.gutter(&Line::numbered(10, "b")), "10 | ");
+        assert_eq!(snippet.gutter(&Line::new("...")), "   | ");
 
-        let unnumbered = Highlight::new().with_line("a");
+        let unnumbered = Snippet::new().with_line("a");
         assert_eq!(unnumbered.gutter(&Line::new("a")), "");
         assert_eq!(unnumbered.gutter(&Line::numbered(8, "a")), "");
     }
 
     #[test]
     fn display_renders_context_around_the_snippet() {
-        let highlight = Highlight::new()
+        let snippet = Snippet::new()
             .with_above("error[E0308]: mismatched types")
             .with_lines([(1, "fn main() {"), (9, "}")])
             .with_below("note: expected `u8`, found `i32`");
@@ -394,27 +417,27 @@ mod tests {
             "note: expected `u8`, found `i32`",
         ]
         .join("\n");
-        assert_eq!(highlight.to_string(), expected);
+        assert_eq!(snippet.to_string(), expected);
     }
 
     #[test]
     fn display_sizes_the_gutter_and_keeps_the_bar_for_unnumbered_lines() {
-        let highlight = Highlight::new()
+        let snippet = Snippet::new()
             .with_line((8, "a"))
             .with_line("b")
             .with_line((10, "c"));
-        assert_eq!(highlight.to_string(), " 8 | a\n   | b\n10 | c");
+        assert_eq!(snippet.to_string(), " 8 | a\n   | b\n10 | c");
     }
 
     #[test]
     fn display_omits_the_gutter_without_numbers_and_context_that_is_none() {
-        assert_eq!(Highlight::new().to_string(), "");
-        assert_eq!(Highlight::new().with_lines(["a", "b"]).to_string(), "a\nb");
-        assert_eq!(Highlight::new().with_above("only").to_string(), "only");
+        assert_eq!(Snippet::new().to_string(), "");
+        assert_eq!(Snippet::new().with_lines(["a", "b"]).to_string(), "a\nb");
+        assert_eq!(Snippet::new().with_above("only").to_string(), "only");
 
         // `Some("")` is set, so it still takes its own empty line.
         assert_eq!(
-            Highlight::new().with_above("").with_below("").to_string(),
+            Snippet::new().with_above("").with_below("").to_string(),
             "\n"
         );
     }

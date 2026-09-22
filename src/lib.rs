@@ -6,7 +6,7 @@
 //!
 //! # Model
 //!
-//! A [`Highlight`] is three parts:
+//! A [`Snippet`] is three parts:
 //!
 //! * a leading context text — optional, a plain [`String`] with no line number;
 //! * the snippet — a `Vec` of [`Line`]s in display order, each holding an
@@ -17,39 +17,39 @@
 //! with unnumbered filler such as an elision marker:
 //!
 //! ```
-//! use caret_highlight::{Highlight, Line};
+//! use caret_highlight::{Line, Snippet};
 //!
-//! let mut highlight = Highlight::new();
-//! highlight
+//! let mut snippet = Snippet::new();
+//! snippet
 //!     .set_above("error[E0308]: mismatched types")
 //!     .push_line((1, "fn main() {"))
 //!     .push_line("...")
 //!     .push_line((9, "}"))
 //!     .set_below("note: expected `u8`, found `i32`");
 //!
-//! assert_eq!(highlight.line_numbers(), vec![Some(1), None, Some(9)]);
-//! assert_eq!(highlight.lines()[0], Line::numbered(1, "fn main() {"));
+//! assert_eq!(snippet.line_numbers(), vec![Some(1), None, Some(9)]);
+//! assert_eq!(snippet.lines()[0], Line::numbered(1, "fn main() {"));
 //! ```
 //!
 //! # Construction
 //!
 //! The fields are private, so two builder styles are provided and can be mixed:
 //!
-//! * owned methods ([`Highlight::with_line`], [`Highlight::with_above`]) that
+//! * owned methods ([`Snippet::with_line`], [`Snippet::with_above`]) that
 //!   consume and return `Self`;
-//! * in-place methods ([`Highlight::push_line`], [`Highlight::set_above`]) that
+//! * in-place methods ([`Snippet::push_line`], [`Snippet::set_above`]) that
 //!   return `&mut Self`.
 //!
 //! [`Line`] converts from `&str`, `String` and `(usize, ...)` tuples, so
-//! [`Highlight::with_lines`] and [`Highlight::extend_lines`] accept all of them
+//! [`Snippet::with_lines`] and [`Snippet::extend_lines`] accept all of them
 //! without a wrapper.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
 mod error;
-mod highlight;
 mod line;
+mod snippet;
 
-pub use highlight::Highlight;
 pub use line::Line;
+pub use snippet::Snippet;
