@@ -51,5 +51,6 @@ mod error;
 mod line;
 mod snippet;
 
+pub use error::Error;
 pub use line::Line;
 pub use snippet::Snippet;
