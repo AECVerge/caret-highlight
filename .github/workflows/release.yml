@@ -1,10 +1,11 @@
 name: Release
 
-# Publishing is driven by a `v<version>` tag, created by hand once the version
-# bump has landed on `main`: tagging is the release decision. The manual
-# dispatch is the recovery path for a tag whose publish failed — re-running the
-# job rather than re-tagging is the fix — which is why the ref is checked
-# before anything is published.
+# The first release is published by hand, because crates.io only offers trusted
+# publishing for a crate that already exists: there is no publisher to configure
+# until v0.1.0 is up. From the second release on, a `v<version>` tag drives this
+# workflow — tagging is the release decision — and `workflow_dispatch` stays as
+# the recovery path for a tag whose publish failed, which is why the ref is
+# checked before anything is published.
 on:
   # enable this after the first release:
   # push:

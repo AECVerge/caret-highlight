@@ -60,9 +60,9 @@ columns — see Conventions.
   is `dtolnay/rust-toolchain`, whose ref *is* the toolchain name (`@stable`,
   `@1.85.0`): `.github/dependabot.yml` ignores it, because a version bump there
   would ask rustup for a release that may not exist, so the MSRV moves by hand,
-  in step with `rust-version`. A pinned `uses:` line and a shell one-liner in a
-  `run:` block are allowed past 80 columns: a SHA with its comment, or a JSON
-  path, does not wrap.
+  in step with `rust-version`.
+- Lines that cannot wrap are allowed past 80 columns: a pinned `uses:` line, a
+  shell one-liner in a `run:` block, and a badge line in `README.md`.
 - Documentation: `README.md` is the guide. Keep `src/lib.rs` to a summary, one
   example and a pointer to the README instead of duplicating it; type-level docs
   stay with their items. Describe what the code does today: no notes about what

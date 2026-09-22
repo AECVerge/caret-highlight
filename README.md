@@ -1,5 +1,11 @@
 # caret-highlight
 
+[![CI](https://github.com/AECVerge/caret-highlight/actions/workflows/ci.yml/badge.svg)](https://github.com/AECVerge/caret-highlight/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/caret-highlight.svg)](https://crates.io/crates/caret-highlight)
+[![docs.rs](https://img.shields.io/docsrs/caret-highlight)](https://docs.rs/caret-highlight)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](#msrv-and-license)
+[![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#msrv-and-license)
+
 Build and render rustc-style highlighted snippets — the `10 |     let x = 1;`
 plus `   |     ^^^^` shape that rustc diagnostics are made of. The crate has no
 dependencies and keeps its distance from color: render a snippet as plain text
@@ -34,18 +40,37 @@ note: expected `u8`, found `i32`
 
 A `Snippet` is three parts and a setting:
 
+```text
+error[E0308]: mismatched types   ← above
+ 9 | fn plus_one(n: u8) -> u8 {  ┐
+10 |     let x: u8 = 1i32;       ┴─lines
+   |                 ^^^^        ← marker
+note: expected `u8`, found `i32` ← below
+```
+
 - `above` — optional text printed before the snippet, a plain `String` with no
-  line number. It can carry prose, such as a diagnostic header.
+  line number.
 - `lines` — the `Line`s of the snippet, in display order.
 - `below` — optional text printed after the snippet, again a plain `String`.
 - `marker` — the character repeated to mark a highlighted range, `'^'` by
   default.
 
+```text
+10 |     let x: u8 = 1i32;
+└─┬─┘└─────────┬─────────┘
+  │            └─ content     `Line::content()`
+  └─ gutter                   `Snippet::gutter(index)`
+
+   |                 ^^^^
+└─┬─┘└─────────┬────────┘
+  │            └─ marks       `Snippet::marker_content(&line)`
+  └─ blank gutter             `Snippet::marker_gutter()`
+```
+
 A `Line` is text plus two pieces of optional data:
 
-- `number` — a 1-based line number. Keeping it optional lets one snippet mix
-  numbered source lines with unnumbered filler such as `...`.
-- `content` — the text of the line, without a trailing newline.
+- `number` — a 1-based line number, or nothing for filler lines such as `...`.
+- `content` — the text of the line: a single line, no trailing newline.
 - `highlight` — a half-open `(start, end)` range of **characters** to mark,
   relative to the text of the line.
 
@@ -64,8 +89,8 @@ assert_eq!(owned, in_place);
 ```
 
 `Line` converts from `&str`, `String`, `(usize, &str)` and `(usize, String)`, so
-the line-taking methods accept any of those without a wrapper. Unnumbered lines
-render bare, which is what an elision marker wants:
+the line-taking methods accept any of those without a wrapper, and a line with
+no number renders without a gutter:
 
 ```rust
 use caret_highlight::Snippet;
@@ -81,38 +106,30 @@ newline**:
 
 - `above` and `below` are written verbatim, and only when they are set: a
   missing text costs no line, while an empty one still takes its own line.
-- Every line is written as its gutter followed by its content.
+- A numbered line is written as `10 | ` — the number right-aligned in a column
+  as wide as the largest number of the snippet — and then its content. A
+  snippet without a numbered line has no gutter at all, and an unnumbered line
+  inside one keeps the `|` column, so that all text starts at the same offset.
 - A line that carries a highlight range is followed by a marker line: a blank
-  gutter and one marker per marked character.
-- An **empty** range is a position rather than nothing, and still gets a single
-  marker — that is how a missing token is pointed at. `(5, 5)` on a line of five
-  characters marks the sixth column.
-
-The gutter is `12 | `, with the line numbers right-aligned in a column as wide
-as the largest number of the snippet. A snippet without a single numbered line
-has no gutter at all, and inside a snippet that has one, an unnumbered line
-keeps the `|` column so that all text starts at the same offset.
+  gutter and one marker per marked character. An **empty** range is a position
+  rather than nothing and still gets a single marker, which is how a missing
+  token is pointed at: `(5, 5)` on a line of five characters marks the sixth
+  column.
 
 ## Coloring the parts
 
-Everything `Display` writes can also be asked for on its own, so a renderer can
-put its own colors in between:
+Everything `Display` writes can also be asked for on its own:
 
 - `above()` and `below()` — the context texts.
 - `lines()` — the lines, whose `number()`, `content()` and `highlight()` are
   readable in turn.
 - `gutter(index)` — the `" 8 | "` in front of the line at `index`, or `None`
-  when the snippet has no such line. The number is read from the snippet, so a
-  gutter is always as wide as the marker gutter next to it.
+  when the snippet has no such line.
 - `marker_gutter()` — the blank gutter that stands in front of a marker line.
 - `marker_content(&line)` — the `"    ^^^^"` under a line, or `None` when that
   line carries no range.
-- `gutter_width()` — the width of the number column. The text of a line starts
-  at column `gutter_width() + 3`, because the `" | "` around the bar takes three
-  columns.
-
-A line's parts are its gutter and content, and, when `marker_content` returns
-`Some`, a marker line made of `marker_gutter()` and those marks:
+- `gutter_width()` — the width of the number column; a line's text starts at
+  `gutter_width() + 3`, the three columns taken by `" | "`.
 
 ```rust
 use caret_highlight::{Line, Snippet};
@@ -145,18 +162,17 @@ for (index, line) in snippet.lines().iter().enumerate() {
 
 ## Validation
 
-A range has to fit the text it marks; nothing in this crate can fail for any
-other reason. That is checked where the value is set, so an error comes back
+A range has to fit the text it marks, and a marker has to be drawable; nothing
+else can fail. Both are checked where the value is set, so the error comes back
 from the call that would have built something undrawable, and a rejected change
 leaves the snippet untouched:
 
-- `Line::with_highlight` and `Line::set_highlight` check the range against the
-  text of the line.
-- `Line::set_content` re-checks the range already on the line against the new
-  text.
-- `Snippet::with_marker` and `Snippet::set_marker` reject a marker that cannot
-  be drawn on a marker line — a control character or a line separator would
-  split it in two.
+- `Line::with_highlight` and `Line::set_highlight` — the range against the text
+  of the line: `Inverted` when it ends before it starts, `PastEnd` when it
+  reaches past the last character.
+- `Line::set_content` — the range already on the line against the new text.
+- `Snippet::with_marker` and `Snippet::set_marker` — a marker that would split
+  the marker line in two, such as a control character: `InvalidMarker`.
 
 ```rust
 use caret_highlight::{Error, Line};
@@ -173,24 +189,15 @@ assert_eq!(line.set_content("let").unwrap_err(), Error::PastEnd {
 assert_eq!(line.content(), "let x = 1;");
 ```
 
-`Error` has three variants: `Inverted` for a range that ends before it starts,
-`PastEnd` for one that reaches past the last character of its line, and
-`InvalidMarker` for a marker that cannot be drawn. It is `#[non_exhaustive]`.
-
-The rest is infallible: the constructors, the `From` conversions, `set_number`,
-`clear_highlight`, `clear_number` and the context text setters. Removing a range
-or a number can never make a line invalid.
+`Error` is `#[non_exhaustive]`, and everything else is infallible: the
+constructors, the `From` conversions, `set_number`, `clear_highlight`,
+`clear_number` and the context text setters.
 
 ## Limits
 
-- Offsets count characters, not bytes, and every character is assumed to be one
-  column wide. A caret under double-width text (CJK, emoji) drifts by one column
-  per wide character.
-- A marker should be one column wide: a double-width marker shifts the marks
-  away from the text above them.
-- Line content is expected to be a single line, without a trailing newline.
-- The gutter is as wide as the largest line number, so a snippet that mixes a
-  three-digit and a one-digit number indents the small numbers more.
+- Every character is assumed to be one column wide, so a caret under
+  double-width text (CJK, emoji) drifts by one column per wide character, and a
+  double-width marker shifts the marks away from the text above them.
 
 ## MSRV and license
 
