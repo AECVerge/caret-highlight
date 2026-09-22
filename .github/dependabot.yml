@@ -6,3 +6,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Its ref is the toolchain to install, not a version, so a bump would ask
+      # rustup for a release that may not exist. The MSRV moves by hand, in step
+      # with `rust-version` in Cargo.toml.
+      - dependency-name: dtolnay/rust-toolchain
