@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A superseded push cancels the run it replaces instead of queueing another.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Nothing here writes to the repository, so ask for the read-only token.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      # A warning is a failure here, the same as it is locally.
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  # One platform: the crate is pure string handling, with no platform-specific
+  # code, no filesystem and no threading.
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Plain `cargo test` is the command the repository guide names, and it runs
+      # the unit tests, the integration test and the doctests in one go —
+      # `--all-targets` would leave the doctests out.
+      - name: test
+        run: cargo test --locked
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The API docs link to each other and to the README, so an unresolvable
+      # link is a failure rather than a warning.
+      - name: doc
+        run: cargo doc --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  msrv:
+    name: msrv (1.85.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The action's `@rev` is the toolchain, so this line and `rust-version` in
+      # Cargo.toml have to move together. The bound is set by edition 2024.
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
+      - name: test
+        run: cargo test --locked
