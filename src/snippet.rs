@@ -104,11 +104,11 @@ impl Snippet {
     /// The gutter in front of the line at `index`, such as `" 8 | "` or
     /// `"10 | "`, or [`None`] when the snippet has no such line.
     ///
-    /// The number comes from the snippet rather than being handed in, so this
-    /// gutter is always as wide as [`Snippet::marker_gutter`] and a marked line
-    /// stays above its marks. It is empty when no line is numbered, and blank
-    /// padding for a line without a number, so that the text of every line
-    /// starts at the same offset.
+    /// The number is read from the snippet, so a gutter is always as wide as
+    /// [`Snippet::marker_gutter`], which keeps a marked line above its marks.
+    /// It is empty when no line is numbered, and blank padding for a line
+    /// without a number, so that the text of every line starts at the same
+    /// offset.
     ///
     /// [`Display`](std::fmt::Display) writes this in front of every line; it is
     /// public so that a colored renderer can print the parts of a line
@@ -141,12 +141,9 @@ impl Snippet {
     /// [`None`] when `line` carries no range. An empty range still draws a
     /// single marker at its position, which is how a missing token is pointed
     /// at: `(5, 5)` on a line of five characters marks the sixth column.
-    /// Ranges always fit their line, so no trimming happens here. Offsets count
-    /// characters, not bytes, and every character is assumed to be one column
-    /// wide.
-    ///
-    /// The line is passed in rather than looked up like [`Snippet::gutter`]:
-    /// the marks depend on the line alone, not on the numbering of the snippet.
+    /// Ranges always fit their line, so marks never run past the end. Offsets
+    /// count characters, not bytes, and every character is assumed to be one
+    /// column wide.
     ///
     /// ```
     /// # use caret_highlight::{Line, Snippet};

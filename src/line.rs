@@ -210,7 +210,8 @@ impl From<(usize, String)> for Line {
 }
 
 impl std::fmt::Display for Line {
-    /// Writes the raw text of the line, ignoring its line number.
+    /// Writes the text of the line, without its line number or any highlight
+    /// range: gutters and marker lines belong to [`Snippet`](crate::Snippet).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.content)
     }

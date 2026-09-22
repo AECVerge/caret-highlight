@@ -1,48 +1,26 @@
-//! Build the data behind a rustc-style highlighted snippet.
+//! Build and render rustc-style highlighted snippets.
 //!
-//! This crate provides the construction layer only: a small, dependency-free
-//! description of a highlighted snippet that a renderer can turn into text.
-//! Nothing here commits to a concrete output format.
+//! A [`Snippet`] is a leading text, a block of [`Line`]s and a trailing text.
+//! A line may carry a number and a half-open range of characters to mark;
+//! [`Display`](std::fmt::Display) writes the whole thing as text, and the same
+//! pieces are available one at a time — [`Snippet::gutter`],
+//! [`Snippet::marker_content`], [`Snippet::lines`] — for a renderer that colors
+//! them itself.
 //!
-//! # Model
-//!
-//! A [`Snippet`] is three parts:
-//!
-//! * a leading context text — optional, a plain [`String`] with no line number;
-//! * the snippet — a `Vec` of [`Line`]s in display order, each holding an
-//!   optional line number and its own text;
-//! * a trailing context text — optional, again a plain [`String`].
-//!
-//! Keeping the line number optional lets one snippet mix numbered source lines
-//! with unnumbered filler such as an elision marker:
+//! Ranges and markers are checked where they are set, so an [`Error`] comes
+//! back from the call that would have built something undrawable.
 //!
 //! ```
 //! use caret_highlight::{Line, Snippet};
 //!
-//! let mut snippet = Snippet::new();
-//! snippet
-//!     .set_above("error[E0308]: mismatched types")
-//!     .push_line((1, "fn main() {"))
-//!     .push_line("...")
-//!     .push_line((9, "}"))
-//!     .set_below("note: expected `u8`, found `i32`");
-//!
-//! assert_eq!(snippet.line_numbers(), vec![Some(1), None, Some(9)]);
-//! assert_eq!(snippet.lines()[0], Line::numbered(1, "fn main() {"));
+//! let snippet = Snippet::new().with_line(
+//!     Line::numbered(7, "let x = 1;").with_highlight((4, 5)).unwrap(),
+//! );
+//! assert_eq!(snippet.to_string(), "7 | let x = 1;\n  |     ^");
 //! ```
 //!
-//! # Construction
-//!
-//! The fields are private, so two builder styles are provided and can be mixed:
-//!
-//! * owned methods ([`Snippet::with_line`], [`Snippet::with_above`]) that
-//!   consume and return `Self`;
-//! * in-place methods ([`Snippet::push_line`], [`Snippet::set_above`]) that
-//!   return `&mut Self`.
-//!
-//! [`Line`] converts from `&str`, `String` and `(usize, ...)` tuples, so
-//! [`Snippet::with_lines`] and [`Snippet::extend_lines`] accept all of them
-//! without a wrapper.
+//! The [README](https://github.com/AECVerge/caret-highlight#readme) covers the
+//! rendering rules, coloring the parts, validation and the known limits.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
