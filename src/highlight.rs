@@ -178,7 +178,8 @@ impl FromIterator<Line> for Highlight {
     ///
     /// ```
     /// # use caret_highlight::{Highlight, Line};
-    /// let highlight: Highlight = [Line::numbered(1, "a"), Line::new("b")].into_iter().collect();
+    /// let lines = [Line::numbered(1, "a"), Line::new("b")];
+    /// let highlight: Highlight = lines.into_iter().collect();
     /// assert_eq!(highlight.line_numbers(), vec![Some(1), None]);
     /// ```
     fn from_iter<I: IntoIterator<Item = Line>>(lines: I) -> Self {

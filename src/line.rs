@@ -45,7 +45,10 @@ impl Line {
     ///
     /// This is the lossless constructor; [`Line::new`] and [`Line::numbered`]
     /// cover the common cases.
-    pub fn with_number(number: Option<usize>, content: impl Into<String>) -> Self {
+    pub fn with_number(
+        number: Option<usize>,
+        content: impl Into<String>,
+    ) -> Self {
         Self {
             number,
             content: content.into(),

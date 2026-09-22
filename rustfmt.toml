@@ -1,0 +1,5 @@
+# Keep every line within 80 columns.
+max_width = 80
+
+# Always write LF, matching `.gitattributes` (`eol=lf`).
+newline_style = "Unix"

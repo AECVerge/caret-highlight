@@ -19,9 +19,13 @@
 //! ```
 //! use caret_highlight::{Highlight, Line};
 //!
-//! let mut highlight = Highlight::new().with_above("error[E0308]: mismatched types");
-//! highlight.push_line((1, "fn main() {")).push_line("...").push_line((9, "}"));
-//! highlight.set_below("note: expected `u8`, found `i32`");
+//! let mut highlight = Highlight::new();
+//! highlight
+//!     .set_above("error[E0308]: mismatched types")
+//!     .push_line((1, "fn main() {"))
+//!     .push_line("...")
+//!     .push_line((9, "}"))
+//!     .set_below("note: expected `u8`, found `i32`");
 //!
 //! assert_eq!(highlight.line_numbers(), vec![Some(1), None, Some(9)]);
 //! assert_eq!(highlight.lines()[0], Line::numbered(1, "fn main() {"));
