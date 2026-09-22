@@ -11,6 +11,8 @@ may carry a number and a range to mark, and `Display` writes the result as text.
 - `README.md` — the user-facing guide, and the primary documentation.
 - `tests/readme.rs` — checks the rendered sample in the README.
 - `CHANGELOG.md` — user-visible changes, one `[Unreleased]` section at a time.
+- `.github/workflows/` — CI: fmt and clippy, the tests (also on the MSRV,
+  1.85.0), the docs build, and the release that publishes from a tag.
 
 ## Commands
 
@@ -53,6 +55,12 @@ columns — see Conventions.
 - 80 columns. rustfmt enforces it for code but does not rewrap comments, so
   wrap doc comments by hand.
 - LF line endings, pinned by `.gitattributes`; `rustfmt.toml` asks for the same.
+- Actions in `.github/workflows/` are pinned to a commit SHA, with the version
+  in a trailing comment for Dependabot to read: `@<sha> # vX.Y.Z`. The exception
+  is `dtolnay/rust-toolchain`, whose ref *is* the toolchain name (`@stable`,
+  `@1.85.0`). A pinned `uses:` line and a shell one-liner in a `run:` block are
+  allowed past 80 columns: a SHA with its comment, or a JSON path, does not
+  wrap.
 - Documentation: `README.md` is the guide. Keep `src/lib.rs` to a summary, one
   example and a pointer to the README instead of duplicating it; type-level docs
   stay with their items. Describe what the code does today: no notes about what
