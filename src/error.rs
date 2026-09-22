@@ -1,15 +1,18 @@
 //! Errors of this crate.
 //!
-//! A [`Line`](crate::Line) is the only thing that can be built wrong: give it a
-//! highlight range that does not fit its text and the range is rejected.
+//! Two things are rejected: a [`Line`](crate::Line) given a highlight range
+//! that does not fit its text, and a [`Snippet`](crate::Snippet) given a marker
+//! that cannot be drawn.
 
 use std::fmt;
 
-/// A highlight range that does not fit the line it marks.
+/// Something a snippet, or one of its lines, cannot be built with.
 ///
-/// A range is half-open and counts characters, so `0..len` is the widest
-/// range a line of `len` characters accepts.
+/// A range is half-open and counts characters, so `0..len` is the widest range
+/// a line of `len` characters accepts. A marker has to be printable, so that a
+/// marker line stays on one line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// The range ends before it starts.
     Inverted {
@@ -27,6 +30,11 @@ pub enum Error {
         /// Number of characters in the line.
         len: usize,
     },
+    /// The marker would break a marker line in two.
+    InvalidMarker {
+        /// The rejected character.
+        marker: char,
+    },
 }
 
 impl fmt::Display for Error {
@@ -42,6 +50,9 @@ impl fmt::Display for Error {
                 f,
                 "highlight range {start}..{end} does not fit in {len} chars"
             ),
+            Self::InvalidMarker { marker } => {
+                write!(f, "marker {marker:?} cannot be drawn")
+            }
         }
     }
 }

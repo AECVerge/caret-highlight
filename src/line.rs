@@ -8,9 +8,9 @@ use crate::Error;
 ///
 /// A line may also carry a range of characters to mark, which is rendered as a
 /// `^^^^` line underneath it. The range is half-open and counts **characters**,
-/// not bytes; without one the line is simply not marked. A range always fits the
-/// text it marks: setting one that does not, or shortening the text under it,
-/// is an [`Error`].
+/// not bytes; without one the line is simply not marked. A range always fits
+/// the text it marks: setting one that does not, or shortening the text under
+/// it, is an [`Error`].
 ///
 /// # Examples
 ///
@@ -122,7 +122,7 @@ impl Line {
     /// # Errors
     ///
     /// Returns [`Error`] when `highlight` does not fit the text of the line:
-    /// the line is left unmarked in that case.
+    /// the range already on the line, if any, is kept in that case.
     pub fn set_highlight(
         &mut self,
         highlight: (usize, usize),
@@ -307,10 +307,15 @@ mod tests {
             }
         );
 
-        // A rejected range leaves the line unmarked.
+        // A rejected range leaves an unmarked line unmarked...
         let mut line = Line::new("abc");
         assert!(line.set_highlight((0, 9)).is_err());
         assert_eq!(line.highlight(), None);
+
+        // ...and keeps the range already on a marked one.
+        let mut marked = Line::new("abc").with_highlight((0, 1)).unwrap();
+        assert!(marked.set_highlight((9, 9)).is_err());
+        assert_eq!(marked.highlight(), Some((0, 1)));
 
         // Offsets are characters, not bytes.
         assert_eq!(

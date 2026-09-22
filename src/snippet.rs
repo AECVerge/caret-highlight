@@ -1,4 +1,4 @@
-use crate::Line;
+use crate::{Error, Line};
 
 /// A rustc-style highlighted snippet, built up from three parts.
 ///
@@ -101,24 +101,27 @@ impl Snippet {
             .unwrap_or(0)
     }
 
-    /// The gutter in front of `line`, such as `" 8 | "` or `"10 | "`.
+    /// The gutter in front of the line at `index`, such as `" 8 | "` or
+    /// `"10 | "`, or [`None`] when the snippet has no such line.
     ///
-    /// It is empty when no line of the snippet is numbered, and blank padding
-    /// for a line without a number, so that the text of every line starts at
-    /// the same offset. `line` needs not belong to this snippet: only its
-    /// number and the gutter width of the snippet matter.
+    /// The number comes from the snippet rather than being handed in, so this
+    /// gutter is always as wide as [`Snippet::marker_gutter`] and a marked line
+    /// stays above its marks. It is empty when no line is numbered, and blank
+    /// padding for a line without a number, so that the text of every line
+    /// starts at the same offset.
     ///
-    /// [`Display`](std::fmt::Display) writes this in front of every line;
-    /// it is public so that a colored renderer can print the parts of a line
+    /// [`Display`](std::fmt::Display) writes this in front of every line; it is
+    /// public so that a colored renderer can print the parts of a line
     /// separately.
-    pub fn gutter(&self, line: &Line) -> String {
-        gutter_of(self.gutter_width(), line.number())
+    pub fn gutter(&self, index: usize) -> Option<String> {
+        let line = self.lines.get(index)?;
+        Some(gutter_of(self.gutter_width(), line.number()))
     }
 
     /// The character repeated to mark a highlighted range, `'^'` by default.
     ///
-    /// It should be one column wide: a tab or a double-width character would
-    /// shift the marks away from the text above them.
+    /// A double-width marker is accepted, but it shifts the marks away from the
+    /// text above them.
     pub fn marker(&self) -> char {
         self.marker
     }
@@ -135,10 +138,15 @@ impl Snippet {
     /// The marks under `line`, indented to the start of its range — the content
     /// half of a marker line.
     ///
-    /// [`None`] when there is nothing to mark: `line` carries no range, or the
-    /// range is empty. Ranges always fit their line, so no trimming happens
-    /// here. Offsets count characters, not bytes, and every character is
-    /// assumed to be one column wide.
+    /// [`None`] when `line` carries no range. An empty range still draws a
+    /// single marker at its position, which is how a missing token is pointed
+    /// at: `(5, 5)` on a line of five characters marks the sixth column.
+    /// Ranges always fit their line, so no trimming happens here. Offsets count
+    /// characters, not bytes, and every character is assumed to be one column
+    /// wide.
+    ///
+    /// The line is passed in rather than looked up like [`Snippet::gutter`]:
+    /// the marks depend on the line alone, not on the numbering of the snippet.
     ///
     /// ```
     /// # use caret_highlight::{Line, Snippet};
@@ -148,10 +156,8 @@ impl Snippet {
     /// ```
     pub fn marker_content(&self, line: &Line) -> Option<String> {
         let (start, end) = line.highlight()?;
-        if start >= end {
-            return None;
-        }
-        Some(" ".repeat(start) + &self.marker.to_string().repeat(end - start))
+        let marks = (end - start).max(1);
+        Some(" ".repeat(start) + &self.marker.to_string().repeat(marks))
     }
 
     /// Returns `true` if there is nothing to show: no leading text, no trailing
@@ -195,9 +201,13 @@ impl Snippet {
     }
 
     /// Sets the character repeated to mark a highlighted range.
-    pub fn with_marker(mut self, marker: char) -> Self {
-        self.set_marker(marker);
-        self
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when `marker` cannot be drawn on a marker line.
+    pub fn with_marker(mut self, marker: char) -> Result<Self, Error> {
+        self.set_marker(marker)?;
+        Ok(self)
     }
 
     // --- builder: in place ---------------------------------------------
@@ -216,11 +226,15 @@ impl Snippet {
 
     /// Sets the character repeated to mark a highlighted range.
     ///
-    /// It should be one column wide: a tab or a double-width character would
-    /// shift the marks away from the text above them.
-    pub fn set_marker(&mut self, marker: char) -> &mut Self {
+    /// # Errors
+    ///
+    /// Returns [`Error`] when `marker` cannot be drawn on a marker line — a
+    /// control character or a line separator: the marker already set is kept in
+    /// that case.
+    pub fn set_marker(&mut self, marker: char) -> Result<&mut Self, Error> {
+        check_marker(marker)?;
         self.marker = marker;
-        self
+        Ok(self)
     }
 
     /// Removes the leading context text.
@@ -301,6 +315,10 @@ impl Extend<Line> for Snippet {
 }
 
 impl std::fmt::Display for Snippet {
+    /// Writes the leading text, the snippet and the trailing text, one per
+    /// line, joined by `\n` and without a trailing newline. A marked line is
+    /// followed by its marker line: [`Snippet::marker_gutter`] and then
+    /// [`Snippet::marker_content`].
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let width = self.gutter_width();
         let mut first = true;
@@ -358,10 +376,18 @@ fn write_separator(
     f.write_str("\n")
 }
 
+/// Checks that a `marker` stays on a single line when it is repeated.
+fn check_marker(marker: char) -> Result<(), Error> {
+    if marker.is_control() || matches!(marker, '\u{2028}' | '\u{2029}') {
+        return Err(Error::InvalidMarker { marker });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::Snippet;
-    use crate::Line;
+    use crate::{Error, Line};
 
     #[test]
     fn owned_and_in_place_builders_agree() {
@@ -453,14 +479,18 @@ mod tests {
 
     #[test]
     fn gutter_is_blank_padding_or_empty() {
-        let snippet = Snippet::new().with_lines([(8, "a"), (10, "b")]);
-        assert_eq!(snippet.gutter(&Line::numbered(8, "a")), " 8 | ");
-        assert_eq!(snippet.gutter(&Line::numbered(10, "b")), "10 | ");
-        assert_eq!(snippet.gutter(&Line::new("...")), "   | ");
+        let snippet = Snippet::new()
+            .with_line((8, "a"))
+            .with_line("...")
+            .with_line((10, "b"));
+        assert_eq!(snippet.gutter(0).as_deref(), Some(" 8 | "));
+        assert_eq!(snippet.gutter(1).as_deref(), Some("   | "));
+        assert_eq!(snippet.gutter(2).as_deref(), Some("10 | "));
+        assert_eq!(snippet.gutter(3), None);
 
         let unnumbered = Snippet::new().with_line("a");
-        assert_eq!(unnumbered.gutter(&Line::new("a")), "");
-        assert_eq!(unnumbered.gutter(&Line::numbered(8, "a")), "");
+        assert_eq!(unnumbered.gutter(0).as_deref(), Some(""));
+        assert_eq!(unnumbered.gutter(1), None);
     }
 
     #[test]
@@ -506,13 +536,33 @@ mod tests {
     fn marker_is_configurable_and_clear_keeps_it() {
         assert_eq!(Snippet::new().marker(), '^');
 
-        let mut snippet = Snippet::new().with_marker('~');
+        let mut snippet = Snippet::new().with_marker('~').unwrap();
         assert_eq!(snippet.marker(), '~');
 
-        snippet.set_marker('-').set_above("a").push_line("b");
+        snippet
+            .set_marker('-')
+            .unwrap()
+            .set_above("a")
+            .push_line("b");
         snippet.clear();
         assert_eq!(snippet.marker(), '-');
         assert!(snippet.is_empty());
+    }
+
+    #[test]
+    fn markers_must_be_printable() {
+        let mut snippet = Snippet::new().with_marker('~').unwrap();
+
+        for marker in ['\n', '\r', '\t', '\0', '\u{2028}'] {
+            assert_eq!(
+                snippet.set_marker(marker).unwrap_err(),
+                Error::InvalidMarker { marker }
+            );
+            assert_eq!(snippet.marker(), '~');
+        }
+
+        // Anything printable goes, even when it is only one column wide.
+        assert_eq!(snippet.set_marker(' ').unwrap().marker(), ' ');
     }
 
     #[test]
@@ -534,19 +584,52 @@ mod tests {
             Some("    ^^")
         );
 
-        // An empty range marks nothing, wherever it sits.
-        assert_eq!(snippet.marker_content(&marked((3, 3))), None);
-        assert_eq!(snippet.marker_content(&marked((6, 6))), None);
+        // An empty range marks the position itself, so a token missing at the
+        // end of the line is pointed at just past it.
+        assert_eq!(
+            snippet.marker_content(&marked((3, 3))).as_deref(),
+            Some("   ^")
+        );
+        assert_eq!(
+            snippet.marker_content(&marked((6, 6))).as_deref(),
+            Some("      ^")
+        );
 
         // Offsets count characters, not bytes.
         let wide = Line::new("变量").with_highlight((1, 2)).unwrap();
         assert_eq!(snippet.marker_content(&wide).as_deref(), Some(" ^"));
 
-        let tilde = Snippet::new().with_marker('~');
+        let tilde = Snippet::new().with_marker('~').unwrap();
         assert_eq!(
             tilde.marker_content(&marked((0, 2))).as_deref(),
             Some("~~")
         );
+    }
+
+    #[test]
+    fn display_places_marker_lines_between_the_context_texts() {
+        let snippet = Snippet::new()
+            .with_above("above")
+            .with_line(
+                Line::numbered(1, "let a = 1;")
+                    .with_highlight((4, 5))
+                    .unwrap(),
+            )
+            .with_line(
+                Line::numbered(2, "let b").with_highlight((5, 5)).unwrap(),
+            )
+            .with_below("below");
+
+        let expected = [
+            "above",
+            "1 | let a = 1;",
+            "  |     ^",
+            "2 | let b",
+            "  |      ^",
+            "below",
+        ]
+        .join("\n");
+        assert_eq!(snippet.to_string(), expected);
     }
 
     #[test]
