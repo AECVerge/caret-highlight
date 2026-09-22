@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-22
+
 ### Added
 
 - `Snippet`, a rustc-style highlighted snippet: an optional leading text, a
@@ -25,7 +27,9 @@ and this project adheres to
   and `Snippet::gutter_width`, next to `Snippet::above`, `Snippet::below`,
   `Snippet::lines` and `Snippet::line_numbers`.
 - A custom marker character, `'^'` by default.
-- Owned and in-place builder methods for every part, over private fields.
+- An owned builder and an in-place setter for the context texts, the lines and
+  the marker, over private fields; everything that clears a part is in-place
+  only.
 - `Line` conversions from `&str`, `String`, `(usize, &str)` and
   `(usize, String)`, plus `FromIterator` and `Extend` for `Snippet`.
 - `Error`, returned when a range does not fit its line (`Inverted`, `PastEnd`)

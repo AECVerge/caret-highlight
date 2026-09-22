@@ -74,8 +74,24 @@ A `Line` is text plus two pieces of optional data:
 - `highlight` — a half-open `(start, end)` range of **characters** to mark,
   relative to the text of the line.
 
-The fields are private. Every part has both an owned builder and an in-place
-one, and the two styles can be mixed:
+The fields are private, so every part is set through a method. Each part of a
+`Snippet` has an owned builder that consumes and returns `Self` and an
+in-place setter that mutates and returns `&mut Self`:
+
+- `above` and `below` — `with_above`/`set_above`, `with_below`/`set_below`.
+- `lines` — `with_line` and `with_lines` / `push_line` and `extend_lines`.
+- `marker` — `with_marker` / `set_marker`, both returning `Error` for a
+  character that cannot be drawn.
+
+`Line` follows the same shape for the two fields that can change after it is
+built: `with_highlight` / `set_highlight` for the range, and `with_number` /
+`set_number` for the number, though `with_number` is a constructor rather
+than a copy of the number already on a line. What a `Line` removes, or
+replaces without returning anything new, is in-place only: `clear_highlight`,
+`clear_number` and `set_content`. A `Snippet` clears the same way, with
+`clear_above`, `clear_below`, `clear_lines` and `clear`.
+
+The two styles can be mixed:
 
 ```rust
 use caret_highlight::{Line, Snippet};
