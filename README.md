@@ -7,9 +7,10 @@
 [![license](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#msrv-and-license)
 
 Build and render rustc-style highlighted snippets — the `10 |     let x = 1;`
-plus `   |     ^^^^` shape that rustc diagnostics are made of. The crate has no
-dependencies and keeps its distance from color: render a snippet as plain text
-with `Display`, or ask for its pieces and paint them yourself.
+plus `   |     ^^^^` shape that rustc diagnostics are made of. It keeps its
+distance from color: render a snippet as plain text with `Display`, or ask for
+its pieces and paint them yourself. Marker lines are measured in display
+columns through `unicode-width`; see [Features](#features) to build without it.
 
 ```rust
 use caret_highlight::{Line, Snippet};
@@ -132,10 +133,10 @@ newline**:
   snippet without a numbered line has no gutter at all, and an unnumbered line
   inside one keeps the `|` column, so that all text starts at the same offset.
 - A line that carries a highlight range is followed by a marker line: a blank
-  gutter and one marker per marked character. An **empty** range is a position
-  rather than nothing and still gets a single marker, which is how a missing
-  token is pointed at: `(5, 5)` on a line of five characters marks the sixth
-  column.
+  gutter and one marker per marked **column**, so a wide character is marked by
+  two of them. An **empty** range is a position rather than nothing and still
+  gets a single marker, which is how a missing token is pointed at: `(5, 5)` on
+  a line of five characters marks the sixth column.
 
 ## Coloring the parts
 
@@ -219,15 +220,34 @@ constructors, the `From` conversions, `set_number`, `clear_highlight`,
 
 ## Limits
 
-- Every character is assumed to be one column wide, so a caret under
-  double-width text (CJK, emoji) drifts by one column per wide character, and a
-  double-width marker shifts the marks away from the text above them.
+- Columns are measured with the `unicode-width` feature, which is on by default.
+  Without it every character counts as one column, so a caret under double-width
+  text (CJK, emoji) drifts by one column per wide character; see
+  [Features](#features).
+- A tab counts as one column: the crate does not expand tabs, so a line indented
+  with them drifts when a terminal expands them to its own tab stops.
+- A marker that is itself two columns wide draws two columns per mark, which
+  makes the mark line wider than the range it marks. A one-column marker stays
+  under the text.
 - A line's text, its range and its comparison are all the text as it was given,
   so `Line::new("a\n")` and `Line::new("a")` render the same and still compare
   unequal.
 - A line is one row at its end only: the trailing line break is dropped when the
   text is read, but a line break inside the text is kept verbatim and renders as
   an extra row, with that line's marker line below all of it.
+
+## Features
+
+- `unicode-width` *(default)* — marker lines are measured in display columns, so
+  a wide character (CJK, an emoji) is two columns, a combining mark none, and a
+  sequence such as `👨‍👩‍👧` the two columns its glyph covers. It is the
+  crate's only dependency, and it pulls in nothing else.
+- Without default features — `default-features = false` — the crate has no
+  dependencies and counts every character as one column.
+
+Enabling the feature anywhere in a build graph enables it for the whole graph,
+so a build either measures columns or it does not. Nothing else changes with it:
+the public API is the same either way.
 
 ## MSRV and license
 

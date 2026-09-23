@@ -8,6 +8,19 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- `unicode-width` as an optional dependency, on by default: a marker line is
+  measured in display columns, so a wide character (CJK, an emoji) is marked by
+  two of them, a combining mark by none, and an emoji sequence by the glyph it
+  renders rather than by the sum of its parts.
+
+### Changed
+
+- A marker line is indented and repeated by column instead of by character, so
+  the marks sit under the text they mark in wide text as well. Without default
+  features the dependency is dropped and every character counts as one column.
+
 ## [0.1.1] - 2026-09-23
 
 ### Changed

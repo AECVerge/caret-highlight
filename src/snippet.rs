@@ -120,8 +120,10 @@ impl Snippet {
 
     /// The character repeated to mark a highlighted range, `'^'` by default.
     ///
-    /// A double-width marker is accepted, but it shifts the marks away from the
-    /// text above them.
+    /// One marker is drawn per column of the range, so a marker that is itself
+    /// two columns wide (`'好'`) makes the mark line twice as wide as the range
+    /// it marks and shifts the marks away from the text above them. A
+    /// one-column marker keeps them under it.
     pub fn marker(&self) -> char {
         self.marker
     }
@@ -141,9 +143,14 @@ impl Snippet {
     /// [`None`] when `line` carries no range. An empty range still draws a
     /// single marker at its position, which is how a missing token is pointed
     /// at: `(5, 5)` on a line of five characters marks the sixth column.
-    /// Ranges always fit their line, so marks never run past the end. Offsets
-    /// count characters, not bytes, and every character is assumed to be one
-    /// column wide.
+    /// Ranges always fit their line, so marks never run past the end.
+    ///
+    /// Offsets count characters, not bytes, but the drawing is measured in
+    /// columns: the indent is the width of the text before the range and there
+    /// is one marker per column the range covers, so a wide character is marked
+    /// by two of them. With the `unicode-width` feature, which is on by
+    /// default, those are display columns; without it every character counts as
+    /// one column.
     ///
     /// ```
     /// # use caret_highlight::{Line, Snippet};
@@ -153,8 +160,9 @@ impl Snippet {
     /// ```
     pub fn marker_content(&self, line: &Line) -> Option<String> {
         let (start, end) = line.highlight()?;
-        let marks = (end - start).max(1);
-        Some(" ".repeat(start) + &self.marker.to_string().repeat(marks))
+        let indent = width_of(line.content(), 0, start);
+        let marks = width_of(line.content(), start, end).max(1);
+        Some(" ".repeat(indent) + &self.marker.to_string().repeat(marks))
     }
 
     /// Returns `true` if there is nothing to show: no leading text, no trailing
@@ -381,6 +389,46 @@ fn check_marker(marker: char) -> Result<(), Error> {
     Ok(())
 }
 
+/// Display columns of `text`: what it occupies in a terminal.
+///
+/// [`Snippet::marker_content`] indents and repeats its marker by column, so a
+/// wide character (CJK, an emoji) counts two and a combining mark none. Only
+/// the drawing is measured here: a range of offsets stays a range of
+/// characters, which is what [`Line`] holds.
+#[cfg(feature = "unicode-width")]
+fn width(text: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(text)
+}
+
+/// Display columns of `text`, counting every character as one.
+///
+/// This is what the crate measures with when the `unicode-width` feature is
+/// off, and it is the assumption the README's limits describe.
+#[cfg(not(feature = "unicode-width"))]
+fn width(text: &str) -> usize {
+    text.chars().count()
+}
+
+/// Byte offset of the `characters`-th character of `text`, or its length when
+/// the text is shorter.
+fn char_offset(text: &str, characters: usize) -> usize {
+    text.char_indices()
+        .nth(characters)
+        .map_or(text.len(), |(offset, _)| offset)
+}
+
+/// Display columns of the characters of `text` in the half-open range of
+/// character offsets `start..end`, clamped to the text.
+///
+/// A range is checked against the text it is set on, so its offsets are both
+/// in that text and on character boundaries; anything else counts as no column
+/// rather than panicking.
+fn width_of(text: &str, start: usize, end: usize) -> usize {
+    let from = char_offset(text, start);
+    let to = char_offset(text, end);
+    text.get(from..to).map_or(0, width)
+}
+
 #[cfg(test)]
 mod tests {
     use super::Snippet;
@@ -592,8 +640,12 @@ mod tests {
             Some("      ^")
         );
 
-        // Offsets count characters, not bytes.
+        // Offsets count characters, not bytes, and only the drawing is measured
+        // in columns: with the feature a wide character is two of them.
         let wide = Line::new("变量").with_highlight((1, 2)).unwrap();
+        #[cfg(feature = "unicode-width")]
+        assert_eq!(snippet.marker_content(&wide).as_deref(), Some("  ^^"));
+        #[cfg(not(feature = "unicode-width"))]
         assert_eq!(snippet.marker_content(&wide).as_deref(), Some(" ^"));
 
         let tilde = Snippet::new().with_marker('~').unwrap();
@@ -652,5 +704,52 @@ mod tests {
             .with_line(Line::new("let z = 3;").with_highlight((0, 3)).unwrap());
         assert_eq!(plain.marker_gutter(), "");
         assert_eq!(plain.to_string(), "let z = 3;\n^^^");
+    }
+
+    #[cfg(feature = "unicode-width")]
+    #[test]
+    fn markers_are_measured_in_columns() {
+        let snippet = Snippet::new();
+        let marks = |text: &str, range| {
+            let line = Line::new(text).with_highlight(range).unwrap();
+            snippet.marker_content(&line)
+        };
+
+        // A wide character is two columns: it draws two markers, and whatever
+        // follows it starts two columns later.
+        assert_eq!(marks("变量", (0, 2)).as_deref(), Some("^^^^"));
+        assert_eq!(marks("变量", (1, 2)).as_deref(), Some("  ^^"));
+        assert_eq!(marks("a变量b", (3, 4)).as_deref(), Some("     ^"));
+
+        // An emoji is two columns, and a sequence of them measures as the glyph
+        // it renders rather than as the sum of its parts.
+        assert_eq!(marks("🦀x", (0, 2)).as_deref(), Some("^^^"));
+        assert_eq!(
+            marks("👨\u{200d}👩\u{200d}👧", (0, 5)).as_deref(),
+            Some("^^")
+        );
+
+        // A combining mark takes no column of its own, so a range over one
+        // still marks the single column it sits on.
+        assert_eq!(marks("e\u{301}x", (0, 1)).as_deref(), Some("^"));
+        assert_eq!(marks("e\u{301}x", (1, 2)).as_deref(), Some(" ^"));
+
+        // A tab is one column: this crate does not expand them.
+        assert_eq!(marks("\ta", (1, 2)).as_deref(), Some(" ^"));
+
+        // And the marker line lands under the text it marks.
+        let line = Line::new("a变量").with_highlight((1, 3)).unwrap();
+        assert_eq!(Snippet::new().with_line(line).to_string(), "a变量\n ^^^^");
+    }
+
+    #[cfg(not(feature = "unicode-width"))]
+    #[test]
+    fn markers_count_characters_without_the_feature() {
+        let line = Line::new("a变量").with_highlight((1, 3)).unwrap();
+        assert_eq!(
+            Snippet::new().marker_content(&line).as_deref(),
+            Some(" ^^")
+        );
+        assert_eq!(Snippet::new().with_line(line).to_string(), "a变量\n ^^");
     }
 }

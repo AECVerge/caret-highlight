@@ -11,6 +11,10 @@ repository = "https://github.com/AECVerge/caret-highlight"
 exclude = ["/.github", "/AGENTS.md"]
 
 [dependencies]
-
+unicode-width = { version = "0.2", optional = true }
 
 [features]
+default = ["unicode-width"]
+
+[package.metadata.docs.rs]
+all-features = true

@@ -30,6 +30,10 @@ jobs:
       # A warning is a failure here, the same as it is locally.
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
+      # The feature is on by default, so this is the only lint run that sees the
+      # fallback path: a cfg arm is where dead code and unused imports hide.
+      - name: clippy without default features
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
 
   # One platform: the crate is pure string handling, with no platform-specific
   # code, no filesystem and no threading.
@@ -46,6 +50,10 @@ jobs:
       # `--all-targets` would leave the doctests out.
       - name: test
         run: cargo test --locked
+      # One column per character is what the crate measures with when the
+      # default feature is off, and this is the only run that exercises it.
+      - name: test without default features
+        run: cargo test --locked --no-default-features
 
   docs:
     name: docs
