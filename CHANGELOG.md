@@ -8,6 +8,16 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- A line keeps the text and the range as they were given and reads them back as
+  one row: `Line::content` drops a trailing line break (`\n`, `\r`, `\r\n`,
+  `\u{2028}`, `\u{2029}`) and `Line::highlight` reports the range clamped to
+  what is left, so a line no longer renders a blank row that pushes its marker
+  line away from the text it marks. A range is still checked against the text as
+  given, so a span taken from the source fits as it is; trailing spaces and tabs
+  are kept, and comparison stays on the text as given.
+
 ## [0.1.0] - 2026-09-22
 
 ### Added

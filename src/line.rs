@@ -12,6 +12,16 @@ use crate::Error;
 /// the text it marks: setting one that does not, or shortening the text under
 /// it, is an [`Error`].
 ///
+/// The text is stored as it was given, trailing line break included, and the
+/// getters report one row: [`Line::content`] drops the trailing line break and
+/// [`Line::highlight`] reads back clamped to what is left, so a line renders as
+/// one row with its marker line under the text it marks. A range taken from the
+/// source text, break included, therefore fits as it is.
+///
+/// Nothing else is trimmed: trailing spaces and tabs are content a caller may
+/// well want to mark. Comparison is on the text as stored, so two lines that
+/// render identically still differ when one arrived with a trailing line break.
+///
 /// # Examples
 ///
 /// ```
@@ -31,11 +41,22 @@ use crate::Error;
 pub struct Line {
     /// 1-based line number, or `None` for a line that carries no position.
     number: Option<usize>,
-    /// Text of the line, without a trailing newline.
+    /// Text of the line as it was given; [`Line::content`] drops its trailing
+    /// line break.
     content: String,
-    /// Half-open range of characters to mark, if any.
+    /// Half-open range of characters to mark, if any; [`Line::highlight`] reads
+    /// it back clamped to the row.
     highlight: Option<(usize, usize)>,
 }
+
+/// The line breaks a line's text drops when it is read.
+///
+/// A rendered line is one row: a trailing break would print a blank row under
+/// the line and push its marker line away from the text it marks. The set is
+/// the one a marker may not be either (see
+/// [`Snippet::set_marker`](crate::Snippet::set_marker)), so the two agree on
+/// what breaks a line.
+const NEWLINES: [char; 4] = ['\r', '\n', '\u{2028}', '\u{2029}'];
 
 /// Checks that a half-open `range` fits in `len` characters.
 fn check_range(range: (usize, usize), len: usize) -> Result<(), Error> {
@@ -88,14 +109,23 @@ impl Line {
         self.number
     }
 
-    /// Returns the text of the line.
+    /// Returns the text of the line: one row, without the trailing line break
+    /// it was given with.
     pub fn content(&self) -> &str {
-        &self.content
+        self.content.trim_end_matches(NEWLINES)
     }
 
-    /// Returns the half-open range of characters to mark, if any.
+    /// Returns the half-open range of characters to mark, if any, clamped to
+    /// [`Line::content`].
+    ///
+    /// A range set against the text as given may reach into the trailing line
+    /// break that text ends with; it then marks the end of the row instead. An
+    /// empty range still points just past the last character, which is how a
+    /// token missing at the end of a line is marked.
     pub fn highlight(&self) -> Option<(usize, usize)> {
-        self.highlight
+        let (start, end) = self.highlight?;
+        let len = self.content().chars().count();
+        Some((start.min(len), end.min(len)))
     }
 
     /// Marks `highlight` on the line, returning `self` for chaining.
@@ -173,9 +203,10 @@ impl Line {
         self.number.is_some()
     }
 
-    /// Returns `true` if the text of the line is empty.
+    /// Returns `true` if the text of the row is empty, so a line holding
+    /// nothing but a line break is empty.
     pub fn is_empty(&self) -> bool {
-        self.content.is_empty()
+        self.content().is_empty()
     }
 }
 
@@ -213,14 +244,14 @@ impl std::fmt::Display for Line {
     /// Writes the text of the line, without its line number or any highlight
     /// range: gutters and marker lines belong to [`Snippet`](crate::Snippet).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.content)
+        f.write_str(self.content())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Line;
-    use crate::Error;
+    use crate::{Error, Snippet};
 
     #[test]
     fn constructors_set_the_optional_number() {
@@ -362,5 +393,65 @@ mod tests {
         let line = Line::numbered(3, text);
         assert_eq!(line.content(), text);
         assert_eq!(line.to_string(), text);
+    }
+
+    #[test]
+    fn the_getters_report_one_row() {
+        // The text and the range are kept as given...
+        let marked = Line::numbered(7, "let x = 1i32;\n")
+            .with_highlight((4, 14))
+            .unwrap();
+
+        // ...and read back as the row that renders, through every window.
+        assert_eq!(marked.content(), "let x = 1i32;");
+        assert_eq!(marked.highlight(), Some((4, 13)));
+        assert_eq!(marked.to_string(), "let x = 1i32;");
+        assert_eq!(
+            Snippet::new().with_line(marked).to_string(),
+            "7 | let x = 1i32;\n  |     ^^^^^^^^^"
+        );
+
+        // Every line break, and nothing else.
+        for text in ["a\n", "a\r\n", "a\r", "a\u{2028}", "a\u{2029}\n"] {
+            assert_eq!(Line::new(text).content(), "a", "{text:?}");
+        }
+        assert_eq!(Line::new("a \t").content(), "a \t");
+        assert!(Line::new("\n").is_empty());
+        assert_eq!(Snippet::new().with_line(Line::new("\n")).to_string(), "");
+    }
+
+    #[test]
+    fn a_range_is_clamped_into_the_row_and_never_inverted() {
+        // The whole text as given, break included, marks the whole row.
+        assert_eq!(
+            Line::new("abc\n")
+                .with_highlight((0, 4))
+                .unwrap()
+                .highlight(),
+            Some((0, 3))
+        );
+
+        // A range that covered only the break, and one entirely past it, both
+        // point just past the row: clamping both ends keeps `end - start` from
+        // underflowing, which is what the marker line is built from.
+        for range in [(3, 4), (4, 4)] {
+            let line = Line::new("abc\n").with_highlight(range).unwrap();
+            assert_eq!(line.highlight(), Some((3, 3)), "{range:?}");
+            assert_eq!(
+                Snippet::new().marker_content(&line).as_deref(),
+                Some("   ^"),
+                "{range:?}"
+            );
+        }
+
+        // Past the text as given is still rejected.
+        assert_eq!(
+            Line::new("abc\n").with_highlight((0, 5)).unwrap_err(),
+            Error::PastEnd {
+                start: 0,
+                end: 5,
+                len: 4
+            }
+        );
     }
 }

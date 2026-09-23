@@ -70,9 +70,14 @@ note: expected `u8`, found `i32` ← below
 A `Line` is text plus two pieces of optional data:
 
 - `number` — a 1-based line number, or nothing for filler lines such as `...`.
-- `content` — the text of the line: a single line, no trailing newline.
+- `content` — the text of the line: one row. A trailing line break — `\n`, `\r`,
+  `\r\n`, `\u{2028}` or `\u{2029}` — is dropped when the text is read, so a line
+  never renders a blank row under itself and pushes its marker line away from
+  the text it marks. Nothing else is trimmed: trailing spaces and tabs are
+  content and are kept.
 - `highlight` — a half-open `(start, end)` range of **characters** to mark,
-  relative to the text of the line.
+  relative to the text of the line **as it was given**, so a span taken from the
+  source fits as it is; reading it reports the range clamped to that row.
 
 The fields are private, so every part is set through a method. Each part of a
 `Snippet` has an owned builder that consumes and returns `Self` and an
@@ -184,9 +189,12 @@ from the call that would have built something undrawable, and a rejected change
 leaves the snippet untouched:
 
 - `Line::with_highlight` and `Line::set_highlight` — the range against the text
-  of the line: `Inverted` when it ends before it starts, `PastEnd` when it
-  reaches past the last character.
-- `Line::set_content` — the range already on the line against the new text.
+  of the line as it was given, trailing line break included: `Inverted` when it
+  ends before it starts, `PastEnd` when it reaches past the last character. A
+  range that only reaches into the trailing line break is accepted, and reads
+  back clamped to the row that renders.
+- `Line::set_content` — the range already on the line against the new text, as
+  given.
 - `Snippet::with_marker` and `Snippet::set_marker` — a marker that would split
   the marker line in two, such as a control character: `InvalidMarker`.
 
@@ -214,6 +222,12 @@ constructors, the `From` conversions, `set_number`, `clear_highlight`,
 - Every character is assumed to be one column wide, so a caret under
   double-width text (CJK, emoji) drifts by one column per wide character, and a
   double-width marker shifts the marks away from the text above them.
+- A line's text, its range and its comparison are all the text as it was given,
+  so `Line::new("a\n")` and `Line::new("a")` render the same and still compare
+  unequal.
+- A line is one row at its end only: the trailing line break is dropped when the
+  text is read, but a line break inside the text is kept verbatim and renders as
+  an extra row, with that line's marker line below all of it.
 
 ## MSRV and license
 
