@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-23
+
 ### Changed
 
 - A line keeps the text and the range as they were given and reads them back as
