@@ -8,8 +8,8 @@ name: Release
 # checked before anything is published.
 on:
   # enable this after the first release:
-  # push:
-  #   tags: ["v*.*.*"]
+  push:
+    tags: ["v*.*.*"]
   workflow_dispatch:
 
 # `contents: read` for the checkout, `id-token: write` so the job can request
