@@ -159,10 +159,14 @@ impl Snippet {
     /// assert_eq!(marks.as_deref(), Some("    ^"));
     /// ```
     pub fn marker_content(&self, line: &Line) -> Option<String> {
-        let (start, end) = line.highlight()?;
-        let indent = width_of(line.content(), 0, start);
-        let marks = width_of(line.content(), start, end).max(1);
-        Some(" ".repeat(indent) + &self.marker.to_string().repeat(marks))
+        let (indent, marks) = marks_of(line)?;
+        // One `char` per column, and a marker is one column wide: this fits
+        // without growing.
+        let mut out =
+            String::with_capacity(indent + marks * self.marker.len_utf8());
+        // Writing into a `String` cannot fail.
+        let _ = write_marks(&mut out, indent, marks, self.marker);
+        Some(out)
     }
 
     /// Returns `true` if there is nothing to show: no leading text, no trailing
@@ -337,13 +341,13 @@ impl std::fmt::Display for Snippet {
 
         for line in &self.lines {
             write_separator(f, &mut first)?;
-            f.write_str(&gutter_of(width, line.number()))?;
+            write_gutter(f, width, line.number())?;
             f.write_str(line.content())?;
 
-            if let Some(marks) = self.marker_content(line) {
+            if let Some((indent, marks)) = marks_of(line) {
                 write_separator(f, &mut first)?;
-                f.write_str(&gutter_of(width, None))?;
-                f.write_str(&marks)?;
+                write_gutter(f, width, None)?;
+                write_marks(f, indent, marks, self.marker)?;
             }
         }
 
@@ -356,19 +360,65 @@ impl std::fmt::Display for Snippet {
     }
 }
 
-/// The gutter of a line numbered `number` when the snippet has a gutter `width`
-/// characters wide, or the blank gutter of a marker line for [`None`].
+/// Writes the gutter of a line numbered `number` when the snippet has a gutter
+/// `width` characters wide, or the blank gutter of a marker line for [`None`].
 ///
-/// Empty when `width` is `0`, blank padding for an unnumbered line otherwise.
+/// Nothing when `width` is `0`, blank padding for an unnumbered line otherwise.
 /// [`Snippet::gutter`], [`Snippet::marker_gutter`] and
-/// [`Display`](std::fmt::Display) all go through this, so the parts a caller
+/// [`Display`](std::fmt::Display) all write through this, so the parts a caller
 /// prints on their own are the whole.
-fn gutter_of(width: usize, number: Option<usize>) -> String {
+fn write_gutter<W: std::fmt::Write>(
+    out: &mut W,
+    width: usize,
+    number: Option<usize>,
+) -> std::fmt::Result {
     match (width, number) {
-        (0, _) => String::new(),
-        (width, Some(number)) => format!("{number:>width$} | "),
-        (width, None) => format!("{:>width$} | ", ""),
+        (0, _) => Ok(()),
+        (width, Some(number)) => write!(out, "{number:>width$} | "),
+        (width, None) => write!(out, "{:>width$} | ", ""),
     }
+}
+
+/// The gutter of a line numbered `number`, as a `String`.
+///
+/// The `String` sink of [`write_gutter`], for a caller that wants the part
+/// rather than a formatter to write it into.
+fn gutter_of(width: usize, number: Option<usize>) -> String {
+    // A hint, not a decision: a `width` of `0` writes no gutter at all, so the
+    // `String` stays empty and takes no allocation.
+    let mut out = String::with_capacity(if width == 0 { 0 } else { width + 3 });
+    // Writing into a `String` cannot fail.
+    let _ = write_gutter(&mut out, width, number);
+    out
+}
+
+/// The indent and the number of marks of `line`: the columns before its range
+/// and the columns that range covers, or [`None`] when it carries no range.
+///
+/// [`Snippet::marker_content`] and [`Display`](std::fmt::Display) both lay a
+/// marker line out from this, so the part a caller prints on its own is the
+/// whole.
+fn marks_of(line: &Line) -> Option<(usize, usize)> {
+    let (start, end) = line.highlight()?;
+    let indent = width_of(line.content(), 0, start);
+    let marks = width_of(line.content(), start, end).max(1);
+    Some((indent, marks))
+}
+
+/// Writes `marks` markers into `out`, indented by `indent` spaces.
+fn write_marks<W: std::fmt::Write>(
+    out: &mut W,
+    indent: usize,
+    marks: usize,
+    marker: char,
+) -> std::fmt::Result {
+    for _ in 0..indent {
+        out.write_char(' ')?;
+    }
+    for _ in 0..marks {
+        out.write_char(marker)?;
+    }
+    Ok(())
 }
 
 /// Writes the `\n` between two rendered lines, except before the first one.
@@ -395,7 +445,9 @@ fn check_marker(marker: char) -> Result<(), Error> {
     }
     // Without the feature `width` counts characters, so this can only fire
     // where the crate measures display columns.
-    let mut encoded = [0; char::MAX_LEN_UTF8];
+    // `char::MAX_LEN_UTF8` names this size, but it is stable only since 1.93
+    // and this crate builds on 1.85.
+    let mut encoded = [0; 4];
     if width(marker.encode_utf8(&mut encoded)) != 1 {
         return Err(Error::InvalidMarker { marker });
     }
@@ -780,5 +832,46 @@ mod tests {
             Some(" ^^")
         );
         assert_eq!(Snippet::new().with_line(line).to_string(), "a变量\n ^^");
+    }
+
+    #[test]
+    fn the_parts_reassemble_into_display() {
+        let snippet = Snippet::new()
+            .with_above("above")
+            .with_lines([
+                Line::numbered(9, "let a = 1;"),
+                Line::numbered(10, "let 变量 = 1i32;")
+                    .with_highlight((4, 6))
+                    .unwrap(),
+                Line::new("..."),
+                Line::numbered(11, "b"),
+            ])
+            .with_below("below");
+
+        // The recipe the README gives a caller that colors the parts.
+        let mut out = String::new();
+        if let Some(above) = snippet.above() {
+            out.push_str(above);
+            out.push('\n');
+        }
+        for (index, line) in snippet.lines().iter().enumerate() {
+            out.push_str(&snippet.gutter(index).unwrap());
+            out.push_str(line.content());
+            out.push('\n');
+
+            if let Some(marks) = snippet.marker_content(line) {
+                out.push_str(&snippet.marker_gutter());
+                out.push_str(&marks);
+                out.push('\n');
+            }
+        }
+        if let Some(below) = snippet.below() {
+            out.push_str(below);
+            out.push('\n');
+        }
+        let keep = out.trim_end_matches('\n').len();
+        out.truncate(keep);
+
+        assert_eq!(out, snippet.to_string());
     }
 }

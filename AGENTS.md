@@ -37,10 +37,13 @@ columns — see Conventions.
 2. **A marker stays on one line.** `set_marker` rejects control characters and
    the Unicode line and paragraph separators.
 3. **Rendering has one source of truth.** `Display`, `Snippet::gutter` and
-   `Snippet::marker_gutter` all format through `gutter_of`; `Display` and
-   `Snippet::marker_content` share the marker formatting. Keep it that way, so
-   that the parts a caller prints on their own reassemble into exactly what
-   `Display` writes.
+   `Snippet::marker_gutter` all write through `write_gutter`; `Display` and
+   `Snippet::marker_content` lay a marker line out from `marks_of` and write it
+   through `write_marks`. The `String`-returning `gutter_of` and
+   `marker_content` are wrappers over those same functions, which is what lets
+   `Display` write straight into a formatter without allocating. Keep it that
+   way, so that the parts a caller prints on their own reassemble into exactly
+   what `Display` writes.
 4. **`Snippet::gutter` takes a line index.** That keeps a stray line — one
    numbered wider than the snippet's gutter — from widening that gutter and
    drifting the marker line under it.
