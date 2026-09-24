@@ -8,6 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Changed
+
+- A marker must be one column wide: a wider one (`'好'`) would push the marks
+  away from the text above them, and a narrower one (a zero-width space, U+200B)
+  would draw nothing at all. Both are refused with `InvalidMarker`, the error a
+  marker that breaks the marker line in two already returned. Where the crate
+  cannot measure columns — without the `unicode-width` feature — only the
+  line-breaking markers are refused.
+
 ## [0.2.0] - 2026-09-24
 
 ### Added

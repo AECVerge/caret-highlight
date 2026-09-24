@@ -30,7 +30,8 @@ pub enum Error {
         /// Number of characters in the line.
         len: usize,
     },
-    /// The marker would break a marker line in two.
+    /// The marker cannot be drawn on a marker line: a control character, a
+    /// line separator, or a character that is not one column wide.
     InvalidMarker {
         /// The rejected character.
         marker: char,

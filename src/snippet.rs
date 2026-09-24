@@ -120,10 +120,10 @@ impl Snippet {
 
     /// The character repeated to mark a highlighted range, `'^'` by default.
     ///
-    /// One marker is drawn per column of the range, so a marker that is itself
-    /// two columns wide (`'好'`) makes the mark line twice as wide as the range
-    /// it marks and shifts the marks away from the text above them. A
-    /// one-column marker keeps them under it.
+    /// A marker is one column wide: a wider one would push the marks away from
+    /// the text above them and a narrower one would draw nothing. One marker is
+    /// drawn per column of the range, so a one-column marker sits under the
+    /// text it marks.
     pub fn marker(&self) -> char {
         self.marker
     }
@@ -209,7 +209,8 @@ impl Snippet {
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] when `marker` cannot be drawn on a marker line.
+    /// Returns [`Error`] when `marker` cannot be drawn on a marker line, as
+    /// [`Snippet::set_marker`] describes.
     pub fn with_marker(mut self, marker: char) -> Result<Self, Error> {
         self.set_marker(marker)?;
         Ok(self)
@@ -233,9 +234,10 @@ impl Snippet {
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] when `marker` cannot be drawn on a marker line — a
-    /// control character or a line separator: the marker already set is kept in
-    /// that case.
+    /// Returns [`Error`] when `marker` cannot be drawn on a marker line: a
+    /// control character, a line separator, or — where the crate measures
+    /// display columns — a character that is not one column wide. The marker
+    /// already set is kept in that case.
     pub fn set_marker(&mut self, marker: char) -> Result<&mut Self, Error> {
         check_marker(marker)?;
         self.marker = marker;
@@ -381,9 +383,20 @@ fn write_separator(
     f.write_str("\n")
 }
 
-/// Checks that a `marker` stays on a single line when it is repeated.
+/// Checks that a `marker` can be drawn: one column wide, and no line break.
+///
+/// A wider marker would push the marks away from the text above them and a
+/// narrower one would draw nothing at all. The line-break checks stand on their
+/// own because a line separator is one column wide wherever the crate measures
+/// columns: they hold even where it cannot.
 fn check_marker(marker: char) -> Result<(), Error> {
     if marker.is_control() || matches!(marker, '\u{2028}' | '\u{2029}') {
+        return Err(Error::InvalidMarker { marker });
+    }
+    // Without the feature `width` counts characters, so this can only fire
+    // where the crate measures display columns.
+    let mut encoded = [0; char::MAX_LEN_UTF8];
+    if width(marker.encode_utf8(&mut encoded)) != 1 {
         return Err(Error::InvalidMarker { marker });
     }
     Ok(())
@@ -606,8 +619,24 @@ mod tests {
             assert_eq!(snippet.marker(), '~');
         }
 
-        // Anything printable goes, even when it is only one column wide.
+        // One column is the whole of a marker: a wider one would push the marks
+        // away from the text above them and a narrower one would draw nothing.
+        #[cfg(feature = "unicode-width")]
+        for marker in ['好', '🦀', '\u{200b}', '\u{0301}'] {
+            assert_eq!(
+                snippet.set_marker(marker).unwrap_err(),
+                Error::InvalidMarker { marker }
+            );
+            assert_eq!(snippet.marker(), '~');
+        }
+        // Without the feature every character is one column wide, so only the
+        // line breaks above are refused.
+        #[cfg(not(feature = "unicode-width"))]
+        assert_eq!(snippet.set_marker('好').unwrap().marker(), '好');
+
+        // Anything printable and one column wide goes, ASCII or not.
         assert_eq!(snippet.set_marker(' ').unwrap().marker(), ' ');
+        assert_eq!(snippet.set_marker('·').unwrap().marker(), '·');
     }
 
     #[test]

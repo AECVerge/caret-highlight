@@ -196,8 +196,10 @@ leaves the snippet untouched:
   back clamped to the row that renders.
 - `Line::set_content` — the range already on the line against the new text, as
   given.
-- `Snippet::with_marker` and `Snippet::set_marker` — a marker that would split
-  the marker line in two, such as a control character: `InvalidMarker`.
+- `Snippet::with_marker` and `Snippet::set_marker` — a marker that cannot be
+  drawn on a marker line (`InvalidMarker`): a control character, a line
+  separator, or, where the crate measures display columns, a character that is
+  not one column wide.
 
 ```rust
 use caret_highlight::{Error, Line};
@@ -226,9 +228,9 @@ constructors, the `From` conversions, `set_number`, `clear_highlight`,
   [Features](#features).
 - A tab counts as one column: the crate does not expand tabs, so a line indented
   with them drifts when a terminal expands them to its own tab stops.
-- A marker that is itself two columns wide draws two columns per mark, which
-  makes the mark line wider than the range it marks. A one-column marker stays
-  under the text.
+- The one-column marker check needs measured columns: without the
+  `unicode-width` feature every character counts as one, so a wide marker is
+  accepted there and draws a mark line wider than the range it marks.
 - A line's text, its range and its comparison are all the text as it was given,
   so `Line::new("a\n")` and `Line::new("a")` render the same and still compare
   unequal.
@@ -241,7 +243,8 @@ constructors, the `From` conversions, `set_number`, `clear_highlight`,
 - `unicode-width` *(default)* — marker lines are measured in display columns, so
   a wide character (CJK, an emoji) is two columns, a combining mark none, and a
   sequence such as `👨‍👩‍👧` the two columns its glyph covers. It is the
-  crate's only dependency, and it pulls in nothing else.
+  crate's only dependency, and it pulls in nothing else. It also lets the crate
+  refuse a marker that is not one column wide.
 - Without default features — `default-features = false` — the crate has no
   dependencies and counts every character as one column.
 
