@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-25
+
 ### Changed
 
 - A marker must be one column wide: a wider one (`'好'`) would push the marks
