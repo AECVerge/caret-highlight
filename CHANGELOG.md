@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-26
+
 ### Added
 
 - A custom gutter. `Snippet::with_bar` / `set_bar` replaces the `|` drawn
