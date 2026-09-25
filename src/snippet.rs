@@ -42,16 +42,24 @@ pub struct Snippet {
     below: Option<String>,
     /// Character repeated to mark a highlighted range.
     marker: char,
+    /// Character between the line number and the text.
+    bar: char,
+    /// Columns of indentation in front of every line of the snippet.
+    indent: usize,
 }
 
 impl Default for Snippet {
-    /// An empty snippet whose [`marker`](Snippet::marker) is `'^'`.
+    /// An empty snippet whose [`marker`](Snippet::marker) is `'^'`, whose
+    /// [`bar`](Snippet::bar) is `'|'` and whose [`indent`](Snippet::indent) is
+    /// `0`.
     fn default() -> Self {
         Self {
             above: None,
             lines: Vec::new(),
             below: None,
             marker: '^',
+            bar: '|',
+            indent: 0,
         }
     }
 }
@@ -104,18 +112,20 @@ impl Snippet {
     /// The gutter in front of the line at `index`, such as `" 8 | "` or
     /// `"10 | "`, or [`None`] when the snippet has no such line.
     ///
-    /// The number is read from the snippet, so a gutter is always as wide as
-    /// [`Snippet::marker_gutter`], which keeps a marked line above its marks.
-    /// It is empty when no line is numbered, and blank padding for a line
-    /// without a number, so that the text of every line starts at the same
-    /// offset.
+    /// It is [`Snippet::indent`] spaces, then the number right-aligned in the
+    /// number column with [`Snippet::bar`] after it. The number is read from
+    /// the snippet, so a gutter is always as wide as
+    /// [`Snippet::marker_gutter`], which keeps a marked line above its marks. A
+    /// line without a number keeps the column blank, so that the text of every
+    /// line starts at the same offset, and a snippet with no numbered line has
+    /// no column and no bar at all: only the indent is written.
     ///
     /// [`Display`](std::fmt::Display) writes this in front of every line; it is
     /// public so that a colored renderer can print the parts of a line
     /// separately.
     pub fn gutter(&self, index: usize) -> Option<String> {
         let line = self.lines.get(index)?;
-        Some(gutter_of(self.gutter_width(), line.number()))
+        Some(gutter_of(self.gutter_style(), line.number()))
     }
 
     /// The character repeated to mark a highlighted range, `'^'` by default.
@@ -128,13 +138,32 @@ impl Snippet {
         self.marker
     }
 
+    /// The character between the line number and the text, `'|'` by default.
+    ///
+    /// It is one column wide, like [`Snippet::marker`], so that the text of
+    /// every line starts at the same offset.
+    pub fn bar(&self) -> char {
+        self.bar
+    }
+
+    /// The columns of indentation in front of every line of the snippet, `0` by
+    /// default.
+    ///
+    /// The indentation stands in front of the gutter, and in front of the lines
+    /// of a snippet that has no gutter at all; the context texts are written
+    /// without it.
+    pub fn indent(&self) -> usize {
+        self.indent
+    }
+
     /// The blank gutter that stands in front of a marker line, such as
     /// `"   | "`.
     ///
-    /// This is the gutter half of a marker line; [`Snippet::marker_content`]
-    /// is the other half.
+    /// It is the gutter of a line without a number, so it is as wide as
+    /// [`Snippet::gutter`]. This is the gutter half of a marker line;
+    /// [`Snippet::marker_content`] is the other half.
     pub fn marker_gutter(&self) -> String {
-        gutter_of(self.gutter_width(), None)
+        gutter_of(self.gutter_style(), None)
     }
 
     /// The marks under `line`, indented to the start of its range — the content
@@ -220,6 +249,23 @@ impl Snippet {
         Ok(self)
     }
 
+    /// Sets the character between the line number and the text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when `bar` cannot be drawn on a gutter line, as
+    /// [`Snippet::set_bar`] describes.
+    pub fn with_bar(mut self, bar: char) -> Result<Self, Error> {
+        self.set_bar(bar)?;
+        Ok(self)
+    }
+
+    /// Sets the columns of indentation in front of every line of the snippet.
+    pub fn with_indent(mut self, indent: usize) -> Self {
+        self.set_indent(indent);
+        self
+    }
+
     // --- builder: in place ---------------------------------------------
 
     /// Sets the leading context text, returning `self` for chaining.
@@ -243,9 +289,37 @@ impl Snippet {
     /// display columns — a character that is not one column wide. The marker
     /// already set is kept in that case.
     pub fn set_marker(&mut self, marker: char) -> Result<&mut Self, Error> {
-        check_marker(marker)?;
+        if !can_be_drawn(marker) {
+            return Err(Error::InvalidMarker { marker });
+        }
         self.marker = marker;
         Ok(self)
+    }
+
+    /// Sets the character between the line number and the text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] when `bar` cannot be drawn on a gutter line: a control
+    /// character, a line separator, or — where the crate measures display
+    /// columns — a character that is not one column wide. The bar already set
+    /// is kept in that case.
+    pub fn set_bar(&mut self, bar: char) -> Result<&mut Self, Error> {
+        if !can_be_drawn(bar) {
+            return Err(Error::InvalidBar { bar });
+        }
+        self.bar = bar;
+        Ok(self)
+    }
+
+    /// Sets the columns of indentation in front of every line of the snippet.
+    ///
+    /// The indentation stands in front of the gutter, and in front of the lines
+    /// of a snippet that has no gutter at all; the context texts are written
+    /// without it.
+    pub fn set_indent(&mut self, indent: usize) -> &mut Self {
+        self.indent = indent;
+        self
     }
 
     /// Removes the leading context text.
@@ -331,7 +405,7 @@ impl std::fmt::Display for Snippet {
     /// followed by its marker line: [`Snippet::marker_gutter`] and then
     /// [`Snippet::marker_content`].
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let width = self.gutter_width();
+        let gutter = self.gutter_style();
         let mut first = true;
 
         if let Some(above) = &self.above {
@@ -341,12 +415,12 @@ impl std::fmt::Display for Snippet {
 
         for line in &self.lines {
             write_separator(f, &mut first)?;
-            write_gutter(f, width, line.number())?;
+            write_gutter(f, gutter, line.number())?;
             f.write_str(line.content())?;
 
             if let Some((indent, marks)) = marks_of(line) {
                 write_separator(f, &mut first)?;
-                write_gutter(f, width, None)?;
+                write_gutter(f, gutter, None)?;
                 write_marks(f, indent, marks, self.marker)?;
             }
         }
@@ -360,22 +434,51 @@ impl std::fmt::Display for Snippet {
     }
 }
 
-/// Writes the gutter of a line numbered `number` when the snippet has a gutter
-/// `width` characters wide, or the blank gutter of a marker line for [`None`].
+/// The fixed shape of the gutter: how wide the number column is, how far the
+/// snippet is indented, and which character stands between the number and the
+/// text.
+#[derive(Clone, Copy)]
+struct Gutter {
+    /// Width of the number column, in characters, or `0` without a number.
+    width: usize,
+    /// Columns of indentation in front of the gutter.
+    indent: usize,
+    /// Character between the number and the text.
+    bar: char,
+}
+
+impl Snippet {
+    /// The gutter shape this snippet draws with.
+    fn gutter_style(&self) -> Gutter {
+        Gutter {
+            width: self.gutter_width(),
+            indent: self.indent,
+            bar: self.bar,
+        }
+    }
+}
+
+/// Writes the gutter of a line numbered `number`, or the blank gutter of a
+/// marker line for [`None`].
 ///
-/// Nothing when `width` is `0`, blank padding for an unnumbered line otherwise.
-/// [`Snippet::gutter`], [`Snippet::marker_gutter`] and
-/// [`Display`](std::fmt::Display) all write through this, so the parts a caller
-/// prints on their own are the whole.
+/// The indent, then nothing else when the number column is empty, or the number
+/// right-aligned in it with the bar after it. [`Snippet::gutter`],
+/// [`Snippet::marker_gutter`] and [`Display`](std::fmt::Display) all write
+/// through this, so the parts a caller prints on their own are the whole.
 fn write_gutter<W: std::fmt::Write>(
     out: &mut W,
-    width: usize,
+    gutter: Gutter,
     number: Option<usize>,
 ) -> std::fmt::Result {
-    match (width, number) {
+    for _ in 0..gutter.indent {
+        out.write_char(' ')?;
+    }
+    match (gutter.width, number) {
         (0, _) => Ok(()),
-        (width, Some(number)) => write!(out, "{number:>width$} | "),
-        (width, None) => write!(out, "{:>width$} | ", ""),
+        (width, Some(number)) => {
+            write!(out, "{number:>width$} {} ", gutter.bar)
+        }
+        (width, None) => write!(out, "{:>width$} {} ", "", gutter.bar),
     }
 }
 
@@ -383,12 +486,17 @@ fn write_gutter<W: std::fmt::Write>(
 ///
 /// The `String` sink of [`write_gutter`], for a caller that wants the part
 /// rather than a formatter to write it into.
-fn gutter_of(width: usize, number: Option<usize>) -> String {
-    // A hint, not a decision: a `width` of `0` writes no gutter at all, so the
-    // `String` stays empty and takes no allocation.
-    let mut out = String::with_capacity(if width == 0 { 0 } else { width + 3 });
+fn gutter_of(gutter: Gutter, number: Option<usize>) -> String {
+    // A hint, not a decision: an empty number column writes no number and no
+    // bar, so the `String` holds the indent and nothing else.
+    let capacity = if gutter.width == 0 {
+        gutter.indent
+    } else {
+        gutter.indent + gutter.width + gutter.bar.len_utf8() + 2
+    };
+    let mut out = String::with_capacity(capacity);
     // Writing into a `String` cannot fail.
-    let _ = write_gutter(&mut out, width, number);
+    let _ = write_gutter(&mut out, gutter, number);
     out
 }
 
@@ -433,25 +541,23 @@ fn write_separator(
     f.write_str("\n")
 }
 
-/// Checks that a `marker` can be drawn: one column wide, and no line break.
+/// True when `glyph` can be drawn on a line of glyphs: one column wide, and no
+/// line break.
 ///
-/// A wider marker would push the marks away from the text above them and a
-/// narrower one would draw nothing at all. The line-break checks stand on their
-/// own because a line separator is one column wide wherever the crate measures
-/// columns: they hold even where it cannot.
-fn check_marker(marker: char) -> Result<(), Error> {
-    if marker.is_control() || matches!(marker, '\u{2028}' | '\u{2029}') {
-        return Err(Error::InvalidMarker { marker });
+/// A wider glyph would push what follows it away and a narrower one would draw
+/// nothing at all. The line-break checks stand on their own because a line
+/// separator is one column wide wherever the crate measures columns: they hold
+/// even where it cannot.
+fn can_be_drawn(glyph: char) -> bool {
+    if glyph.is_control() || matches!(glyph, '\u{2028}' | '\u{2029}') {
+        return false;
     }
     // Without the feature `width` counts characters, so this can only fire
     // where the crate measures display columns.
     // `char::MAX_LEN_UTF8` names this size, but it is stable only since 1.93
     // and this crate builds on 1.85.
     let mut encoded = [0; 4];
-    if width(marker.encode_utf8(&mut encoded)) != 1 {
-        return Err(Error::InvalidMarker { marker });
-    }
-    Ok(())
+    width(glyph.encode_utf8(&mut encoded)) == 1
 }
 
 /// Display columns of `text`: what it occupies in a terminal.
@@ -873,5 +979,69 @@ mod tests {
         out.truncate(keep);
 
         assert_eq!(out, snippet.to_string());
+    }
+
+    #[test]
+    fn bar_and_indent_shape_the_gutter() {
+        let mut snippet = Snippet::new().with_lines([(8, "a"), (10, "b")]);
+        assert_eq!(snippet.bar(), '|');
+        assert_eq!(snippet.indent(), 0);
+
+        // The bar replaces the `|` wherever a gutter is drawn.
+        snippet.set_bar('!').unwrap();
+        assert_eq!(snippet.gutter(0).as_deref(), Some(" 8 ! "));
+        assert_eq!(snippet.marker_gutter(), "   ! ");
+        assert_eq!(snippet.to_string(), " 8 ! a\n10 ! b");
+
+        // The indent stands in front of the gutter, and the context texts are
+        // written without it.
+        let marked = Snippet::new()
+            .with_above("above")
+            .with_line(
+                Line::numbered(7, "let x = 1;")
+                    .with_highlight((4, 5))
+                    .unwrap(),
+            )
+            .with_below("below")
+            .with_bar(':')
+            .unwrap()
+            .with_indent(2);
+        assert_eq!(
+            marked.to_string(),
+            "above\n  7 : let x = 1;\n    :     ^\nbelow"
+        );
+
+        // With no numbered line there is no number column and no bar, and the
+        // indent is all a gutter holds.
+        let plain = Snippet::new().with_lines(["a", "b"]).with_indent(1);
+        assert_eq!(plain.gutter(0).as_deref(), Some(" "));
+        assert_eq!(plain.to_string(), " a\n b");
+    }
+
+    #[test]
+    fn bars_must_be_drawable() {
+        let mut snippet = Snippet::new().with_bar(':').unwrap();
+
+        for bar in ['\n', '\r', '\t', '\0', '\u{2028}'] {
+            assert_eq!(
+                snippet.set_bar(bar).unwrap_err(),
+                Error::InvalidBar { bar }
+            );
+            assert_eq!(snippet.bar(), ':');
+        }
+
+        // One column is the whole of it, exactly as for a marker.
+        #[cfg(feature = "unicode-width")]
+        for bar in ['好', '🦀', '\u{200b}'] {
+            assert_eq!(
+                snippet.set_bar(bar).unwrap_err(),
+                Error::InvalidBar { bar }
+            );
+            assert_eq!(snippet.bar(), ':');
+        }
+        #[cfg(not(feature = "unicode-width"))]
+        assert_eq!(snippet.set_bar('好').unwrap().bar(), '好');
+
+        assert_eq!(snippet.set_bar('·').unwrap().bar(), '·');
     }
 }

@@ -55,6 +55,10 @@ note: expected `u8`, found `i32` ← below
 - `below` — optional text printed after the snippet, again a plain `String`.
 - `marker` — the character repeated to mark a highlighted range, `'^'` by
   default.
+- `bar` — the character between the line number and the text, `'|'` by default;
+  it is one column wide, like the marker.
+- `indent` — the columns of indentation in front of every line of the snippet,
+  `0` by default. The context texts are not indented.
 
 ```text
 10 |     let x: u8 = 1i32;
@@ -86,8 +90,10 @@ in-place setter that mutates and returns `&mut Self`:
 
 - `above` and `below` — `with_above`/`set_above`, `with_below`/`set_below`.
 - `lines` — `with_line` and `with_lines` / `push_line` and `extend_lines`.
-- `marker` — `with_marker` / `set_marker`, both returning `Error` for a
-  character that cannot be drawn.
+- `marker` and `bar` — `with_marker` / `set_marker` and `with_bar` / `set_bar`,
+  both returning `Error` for a character that cannot be drawn.
+- `indent` — `with_indent` / `set_indent`, the columns of indentation in front
+  of every line of the snippet.
 
 `Line` follows the same shape for the two fields that can change after it is
 built: `with_highlight` / `set_highlight` for the range, and `with_number` /
@@ -128,10 +134,11 @@ newline**:
 
 - `above` and `below` are written verbatim, and only when they are set: a
   missing text costs no line, while an empty one still takes its own line.
-- A numbered line is written as `10 | ` — the number right-aligned in a column
-  as wide as the largest number of the snippet — and then its content. A
-  snippet without a numbered line has no gutter at all, and an unnumbered line
-  inside one keeps the `|` column, so that all text starts at the same offset.
+- A numbered line is written as `10 | `: the indent, then the number
+  right-aligned in a column as wide as the largest number of the snippet, then
+  the bar between two spaces. An unnumbered line inside such a snippet keeps the
+  column blank, so that all text starts at the same offset; a snippet without a
+  numbered line has no column and no bar at all, only the indent.
 - A line that carries a highlight range is followed by a marker line: a blank
   gutter and one marker per marked **column**, so a wide character is marked by
   two of them. An **empty** range is a position rather than nothing and still
@@ -151,7 +158,8 @@ Everything `Display` writes can also be asked for on its own:
 - `marker_content(&line)` — the `"    ^^^^"` under a line, or `None` when that
   line carries no range.
 - `gutter_width()` — the width of the number column; a line's text starts at
-  `gutter_width() + 3`, the three columns taken by `" | "`.
+  `indent() + gutter_width() + 3`, the three columns taken by the space, the bar
+  and the space.
 
 ```rust
 use caret_highlight::{Line, Snippet};
@@ -200,6 +208,8 @@ leaves the snippet untouched:
   drawn on a marker line (`InvalidMarker`): a control character, a line
   separator, or, where the crate measures display columns, a character that is
   not one column wide.
+- `Snippet::with_bar` and `Snippet::set_bar` — the same rule for the gutter bar,
+  reported as `InvalidBar`.
 
 ```rust
 use caret_highlight::{Error, Line};

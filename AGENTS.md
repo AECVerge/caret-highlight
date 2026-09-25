@@ -34,8 +34,10 @@ columns — see Conventions.
    against the new text. A rejected change leaves the value untouched, so
    validate first and assign afterwards. There is no unvalidated way in: that is
    why the fields are private and why `Line` has no `content_mut`.
-2. **A marker stays on one line.** `set_marker` rejects control characters and
-   the Unicode line and paragraph separators.
+2. **A marker, and the gutter bar, stay on one line, one column wide.**
+   `set_marker` and `set_bar` reject a control character, a Unicode line or
+   paragraph separator, and — where the crate measures display columns — any
+   character that is not one column wide.
 3. **Rendering has one source of truth.** `Display`, `Snippet::gutter` and
    `Snippet::marker_gutter` all write through `write_gutter`; `Display` and
    `Snippet::marker_content` lay a marker line out from `marks_of` and write it

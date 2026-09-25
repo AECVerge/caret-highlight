@@ -8,6 +8,15 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- A custom gutter. `Snippet::with_bar` / `set_bar` replaces the `|` drawn
+  between the line number and the text; like the marker it has to be one column
+  wide, and a character that cannot be drawn comes back as the new `InvalidBar`
+  error. `Snippet::with_indent` / `set_indent` puts that many columns of
+  indentation in front of every line of the snippet, leaving the context texts
+  alone. Both default to what the crate drew before.
+
 ## [0.2.1] - 2026-09-25
 
 ### Changed
